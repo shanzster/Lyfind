@@ -143,6 +143,34 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "guardIntake",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "custodianId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "loggedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "guardClaims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "custodianId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "claimedAt",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

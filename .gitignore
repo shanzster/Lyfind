@@ -1,14 +1,26 @@
-node_modules
-node_modules
-dist
+# v0 runtime files (should only exist in preview, not in git)
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+instrumentation-client.js
+instrumentation-client.ts
+
+# Common ignores
+node_modules/
+.next/
+.env*.local
+.DS_Store
+# Build output
+dist/
+
+# Environment files (contain API keys)
 .env
+
+# Firebase service-account keys — never commit
 *firebase-adminsdk*.json
-# Environment variables
-.env
-.env.*
-!.env.example
-.env
-.env.*
-dist
-node_modules
-*adminsdk*.json
+*firebase-adminsdk-base64*
+
+# Files containing embedded secrets — never commit
+notification-server/generate-base64.js
+docs/archive/WHAT_I_DID_TODAY.MD
+docs/archive/

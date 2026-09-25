@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/sonner';
@@ -53,6 +53,8 @@ const ActivityLogs = lazy(() => import('@/pages/admin/ActivityLogs'));
 const Settings = lazy(() => import('@/pages/admin/Settings'));
 const TeacherVerifications = lazy(() => import('@/pages/admin/TeacherVerifications'));
 const AdminAnnouncements = lazy(() => import('@/pages/admin/Announcements'));
+const AdminGuardIntake = lazy(() => import('@/pages/admin/GuardIntake'));
+const AdminPostItem = lazy(() => import('@/pages/admin/PostItem'));
 
 // Utility pages (lazy)
 const SeedAdmin = lazy(() => import('@/pages/SeedAdmin'));
@@ -67,9 +69,47 @@ function LoadingFallback() {
   );
 }
 
+function WakeRenderService() {
+  useEffect(() => {
+    const wakeUrl = import.meta.env.VITE_NOTIFICATION_SERVER_URL || import.meta.env.VITE_RENDER_WAKE_URL;
+
+    if (!wakeUrl) return;
+
+    const pingService = () => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 5000);
+
+      fetch(wakeUrl, {
+        method: 'GET',
+        cache: 'no-store',
+        mode: 'no-cors',
+        signal: controller.signal,
+      }).catch(() => {
+        // Ignore ping failures; the app should still work even if the server is sleeping.
+      }).finally(() => {
+        window.clearTimeout(timeout);
+      });
+    };
+
+    pingService();
+    const intervalId = window.setInterval(pingService, 4 * 60 * 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  return null;
+}
+
 // Requires a logged-in user; otherwise redirects to /login
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, userProfile } = useAuth();
+  const location = useLocation();
+
+  const isCustodianRestrictedRoute =
+    String(userProfile?.role ?? '') === 'custodian' &&
+    !location.pathname.startsWith('/guard-station');
 
   if (loading) {
     return <LoadingFallback />;
@@ -77,6 +117,10 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (isCustodianRestrictedRoute) {
+    return <Navigate to="/guard-station" replace />;
   }
 
   return <>{children}</>;
@@ -122,7 +166,8 @@ export default function App() {
                        location.pathname.startsWith('/diagnostic') ||
                        location.pathname.startsWith('/my-items') ||
                        location.pathname.startsWith('/notifications') ||
-                       location.pathname.startsWith('/teacher-verification');
+                       location.pathname.startsWith('/teacher-verification') ||
+                       location.pathname.startsWith('/guard-station');
 
   const isAdminPage = location.pathname.startsWith('/admin');
 
@@ -132,6 +177,7 @@ export default function App() {
     <ThemeProvider defaultTheme="system" storageKey="ui-theme">
       <AuthProvider>
         <NotificationProvider>
+          <WakeRenderService />
           <PushNotificationSetup />
           <div className="min-h-screen bg-background">
             {shouldShowHeader && <Header />}
@@ -185,6 +231,8 @@ export default function App() {
               <Route path="/admin/users" element={<AdminRoute><UsersManagement /></AdminRoute>} />
               <Route path="/admin/users/:id" element={<AdminRoute><UserDetails /></AdminRoute>} />
               <Route path="/admin/items" element={<AdminRoute><ItemsManagement /></AdminRoute>} />
+              <Route path="/admin/post" element={<AdminRoute><AdminPostItem /></AdminRoute>} />
+              <Route path="/admin/guard-intake" element={<AdminRoute><AdminGuardIntake /></AdminRoute>} />
               <Route path="/admin/items/:id" element={<AdminRoute><ItemDetails /></AdminRoute>} />
               <Route path="/admin/reports" element={<AdminRoute><ReportsManagement /></AdminRoute>} />
               <Route path="/admin/messages" element={<AdminRoute><MessagesMonitoring /></AdminRoute>} />

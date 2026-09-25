@@ -18,7 +18,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, '..');
 
 const CUSTODIAN_CONFIG = {
-  email: 'ManonGuard@gmail.com',
+  email: 'guardstation@lsb.edu.ph',
   password: 'Password123!',
   displayName: 'Guard Station',
 };

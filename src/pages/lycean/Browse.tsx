@@ -158,16 +158,34 @@ export default function BrowsePage() {
       .getLatestActive()
       .then((a) => {
         if (!a) return
-        const dismissed = JSON.parse(localStorage.getItem('dismissedAnnouncements') || '[]')
-        if (!dismissed.includes(a.id)) setAnnouncement(a)
+
+        try {
+          const rawDismissed = localStorage.getItem('dismissedAnnouncements')
+          const dismissed = rawDismissed ? JSON.parse(rawDismissed) : []
+          if (!Array.isArray(dismissed) || !dismissed.includes(a.id)) {
+            setAnnouncement(a)
+          }
+        } catch (error) {
+          console.error('[Browse] Failed to parse dismissed announcements:', error)
+          setAnnouncement(a)
+        }
       })
       .catch((error) => console.error('[Browse] Failed to load announcement:', error))
   }, [])
 
   const dismissAnnouncement = () => {
     if (!announcement?.id) return
-    const dismissed = JSON.parse(localStorage.getItem('dismissedAnnouncements') || '[]')
-    localStorage.setItem('dismissedAnnouncements', JSON.stringify([...dismissed, announcement.id]))
+
+    try {
+      const rawDismissed = localStorage.getItem('dismissedAnnouncements')
+      const dismissed = rawDismissed ? JSON.parse(rawDismissed) : []
+      const nextDismissed = Array.isArray(dismissed) ? dismissed : []
+      const uniqueDismissed = [...new Set([...nextDismissed, announcement.id])]
+      localStorage.setItem('dismissedAnnouncements', JSON.stringify(uniqueDismissed))
+    } catch (error) {
+      console.error('[Browse] Failed to update dismissed announcements:', error)
+    }
+
     setAnnouncement(null)
   }
 
@@ -316,11 +334,26 @@ export default function BrowsePage() {
         <div className="max-w-7xl mx-auto">
           {/* Campus Announcement Banner */}
           {announcement && (
-            <div className="mb-6 p-4 rounded-2xl bg-[#ff7400]/15 border border-[#ff7400]/40 flex items-start gap-3">
-              <span className="text-xl flex-shrink-0">📢</span>
+            <div
+              className={`mb-6 p-4 rounded-2xl border flex items-start gap-3 ${
+                announcement.priority === 'urgent'
+                  ? 'bg-red-500/10 border-red-400/40'
+                  : announcement.priority === 'warning'
+                    ? 'bg-amber-500/10 border-amber-400/40'
+                    : 'bg-[#ff7400]/15 border-[#ff7400]/40'
+              }`}
+            >
+              <span className="text-xl flex-shrink-0">
+                {announcement.priority === 'urgent' ? '🚨' : announcement.priority === 'warning' ? '⚠️' : '📢'}
+              </span>
               <div className="flex-1 min-w-0">
-                <p className="text-white font-semibold text-sm lg:text-base">{announcement.title}</p>
-                <p className="text-white/70 text-xs lg:text-sm mt-0.5">{announcement.message}</p>
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <p className="text-white font-semibold text-sm lg:text-base">{announcement.title}</p>
+                  <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-white/70">
+                    {announcement.priority || 'info'}
+                  </span>
+                </div>
+                <p className="text-white/80 text-xs lg:text-sm mt-0.5">{announcement.message}</p>
               </div>
               <button
                 onClick={dismissAnnouncement}

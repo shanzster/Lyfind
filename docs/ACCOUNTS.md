@@ -9,7 +9,7 @@ Local dev: http://localhost:3000 (npm run dev)
 |---|---|---|---|
 | Admin | AdminSiJerlyn@gmail.com | Password123! | /admin/login |
 | Teacher (verified) | teacher@lsb.edu.ph | Password123! | /login |
-| Custodian (Guard Station) | ManonGuard@gmail.com | Password123! | /login |
+| Custodian (Guard Station) | guardstation@lsb.edu.ph | Password123! | /login |
 | Student | register your own @lsb.edu.ph email | your choice | /login |
 
 All seeded passwords are Password123!. Change them after the demo — they are
@@ -34,9 +34,10 @@ Reset: node scripts/seed-teacher.js
 ## How to log in as Custodian (Guard Station)
 
 1. Go to https://lyfind-72845.web.app/login (normal login page).
-2. Enter ManonGuard@gmail.com / Password123!
+2. Enter guardstation@lsb.edu.ph / Password123!
 3. A Guard Station entry appears at the top of the sidebar → https://lyfind-72845.web.app/guard-station
-4. From the dashboard: "Log New Item" posts a turned-in item (live instantly, tagged "Held at Guard Station"); "Claimed" on a held item opens the pickup form (claimer name + student ID + note) and records it in the permanent pickup log.
+4. From the dashboard: "Log New Item" records a turned-in item (photo, name, category, description, finder's name + student ID, where/when found) in the guard intake log — it is NOT posted publicly. Admins see it under Admin → Guard Station Intake and use "Post to board" to publish it as a found item (tagged "Held at Guard Station"). "Claimed" on a held item opens the pickup form (claimer name + student ID + note), records it in the permanent pickup log, and resolves the public post if one exists.
+5. Admins can also post any item themselves from Admin → Items → "Post Item" (/admin/post).
 
 Reset: node scripts/seed-custodian.js
 

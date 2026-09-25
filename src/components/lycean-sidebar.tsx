@@ -22,9 +22,9 @@ export default function LyceanSidebar({ hideMobileFab = false }: LyceanSidebarPr
   const navigate = useNavigate()
   const { logout, userProfile } = useAuth()
 
-  // Custodians get the Guard Station dashboard in their nav
+  // Custodians are restricted to the Guard Station workflow only.
   const navItems = userProfile?.role === 'custodian'
-    ? [{ name: 'Guard Station', href: '/guard-station', icon: Building2 }, ...navigation]
+    ? [{ name: 'Guard Station', href: '/guard-station', icon: Building2 }]
     : navigation
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 

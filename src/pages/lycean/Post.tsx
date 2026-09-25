@@ -161,7 +161,6 @@ export default function PostPage() {
       
       // Verified teachers skip the approval queue — their posts go live immediately
       const isFaculty = userProfile?.role === 'faculty';
-      const isCustodian = userProfile?.role === 'custodian';
 
       const itemData: any = {
         type: itemType,
@@ -181,11 +180,9 @@ export default function PostPage() {
         userId: user.uid,
         userName: userProfile?.displayName || user.displayName || user.email?.split('@')[0] || 'Anonymous',
         userEmail: user.email!,
-        status: (isFaculty || isCustodian ? 'active' : 'pending_approval') as any,
+        status: (isFaculty ? 'active' : 'pending_approval') as any,
         ...(isFaculty ? { postedByFaculty: true } : {}),
-        // Custodian posts are live immediately and flagged as held at the guard desk
-        ...(isCustodian ? { heldAtGuardStation: true } : {}),
-        approval: isFaculty || isCustodian
+        approval: isFaculty
           ? {
               status: 'approved',
               submittedAt: new Date(),
@@ -216,8 +213,8 @@ export default function PostPage() {
       const itemId = await itemService.createItem(itemData);
       console.log('[Post] Item created with ID:', itemId)
 
-      if (isFaculty || isCustodian) {
-        // Faculty/custodian posts are live immediately — run auto-match and
+      if (isFaculty) {
+        // Faculty posts are live immediately — run auto-match and
         // saved-search alerts right away. (Non-faculty posts run these after
         // admin approval instead.)
         console.log('[Post] Triggering auto-match (live post)...')
@@ -228,11 +225,7 @@ export default function PostPage() {
         watchService.notifyWatchersForNewItem({ id: itemId, ...itemData } as any).catch(error => {
           console.error('[Post] Watch alerts failed:', error);
         });
-        toast.success(
-          isCustodian
-            ? 'Item posted! It is marked as held at the Guard Station.'
-            : 'Item posted! As a verified teacher, your post is live immediately.'
-        )
+        toast.success('Item posted! As a verified teacher, your post is live immediately.')
       } else {
         toast.success('Item submitted for approval!')
       }

@@ -16,6 +16,12 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
+    // Custodian = users/{uid}.role == 'custodian' (Guard Station role)
+    function isCustodian() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'custodian';
+    }
+
     // ── Users ─────────────────────────────────────────────────────────────
     // Profiles are visible to signed-in users (names/photos shown on items).
     // Only the owner edits their own profile; role escalation is blocked —
@@ -37,13 +43,18 @@ service cloud.firestore {
     // whichever browser runs the matcher).
     match /items/{itemId} {
       allow read: if true;
-      allow create: if isSignedIn()
-        && request.resource.data.userId == request.auth.uid;
+      allow create: if isAdmin()
+        || (isSignedIn() && request.resource.data.userId == request.auth.uid);
       allow update: if isAdmin()
         || (isSignedIn() && resource.data.userId == request.auth.uid)
         || (isSignedIn()
             && request.resource.data.diff(resource.data).affectedKeys()
-                 .hasOnly(['aiFeatures', 'updatedAt']));
+                 .hasOnly(['aiFeatures', 'updatedAt']))
+        // Custodian resolving a guard-held item when it is picked up
+        || (isCustodian()
+            && resource.data.heldAtGuardStation == true
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status', 'claimedAt', 'updatedAt']));
       allow delete: if isAdmin()
         || (isSignedIn() && resource.data.userId == request.auth.uid);
     }
@@ -177,12 +188,30 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // ── Guard Station intake log ──────────────────────────────────────────
+    // Custodians log turned-in items here (never straight to /items). Each
+    // custodian reads/updates their own entries (only to record a release);
+    // admins read everything and mark entries posted.
+    match /guardIntake/{intakeId} {
+      allow create: if isCustodian()
+        && request.resource.data.custodianId == request.auth.uid
+        && request.resource.data.status == 'logged';
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.custodianId == request.auth.uid);
+      allow update: if isAdmin()
+        || (isCustodian()
+            && resource.data.custodianId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status', 'releasedTo', 'releasedAt', 'updatedAt'])
+            && request.resource.data.status == 'released');
+      allow delete: if isAdmin();
+    }
+
     // ── Guard Station pickup log ──────────────────────────────────────────
     // Only custodians write; each custodian reads their own log; admins all.
     match /guardClaims/{claimId} {
-      allow create: if isSignedIn()
-        && request.resource.data.custodianId == request.auth.uid
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'custodian';
+      allow create: if isCustodian()
+        && request.resource.data.custodianId == request.auth.uid;
       allow read: if isAdmin()
         || (isSignedIn() && resource.data.custodianId == request.auth.uid);
       allow update, delete: if isAdmin();

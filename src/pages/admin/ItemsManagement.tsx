@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Filter, Trash2, Eye, Package, Calendar } from 'lucide-react';
+import { Search, Filter, Trash2, Eye, Package, Calendar, PlusCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import AdminSidebar from '@/components/admin/AdminSidebar';
 import { useAdminAuth } from '@/contexts/AdminAuthContext';
@@ -86,13 +86,22 @@ export default function ItemsManagement() {
       <main className="min-h-screen pt-6 lg:pt-12 pb-24 lg:pb-12 px-4 lg:px-6 lg:pl-80 lg:pr-12 bg-[#2f1632]">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-3xl lg:text-4xl font-bold text-white mb-2">
-              Items Management
-            </h1>
-            <p className="text-white/60">
-              {filteredItems.length} item{filteredItems.length !== 1 ? 's' : ''} found
-            </p>
+          <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h1 className="text-3xl lg:text-4xl font-bold text-white mb-2">
+                Items Management
+              </h1>
+              <p className="text-white/60">
+                {filteredItems.length} item{filteredItems.length !== 1 ? 's' : ''} found
+              </p>
+            </div>
+            <Link
+              to="/admin/post"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-[#ff7400] hover:bg-[#ff8500] text-white font-medium transition-all"
+            >
+              <PlusCircle className="w-5 h-5" />
+              Post Item
+            </Link>
           </div>
 
           {/* Filters */}

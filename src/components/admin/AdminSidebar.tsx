@@ -12,7 +12,8 @@ import {
   LogOut,
   Sparkles,
   GraduationCap,
-  Megaphone
+  Megaphone,
+  Building2
 } from 'lucide-react';
 import { useAdminAuth } from '@/contexts/AdminAuthContext';
 
@@ -50,6 +51,12 @@ export default function AdminSidebar() {
       icon: Package,
       label: 'Items',
       path: '/admin/items',
+      permission: 'items.view'
+    },
+    {
+      icon: Building2,
+      label: 'Guard Station Intake',
+      path: '/admin/guard-intake',
       permission: 'items.view'
     },
     {
