@@ -262,6 +262,144 @@ app.post('/api/send-batch-notifications', async (req, res) => {
   }
 });
 
+// Verify the caller is a signed-in admin: Authorization: Bearer <Firebase ID token>
+// whose uid has an active document at admins/{uid}. Returns the decoded token,
+// or null after writing the error response.
+async function requireAdmin(req, res) {
+  const authHeader = req.headers.authorization || '';
+  const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!idToken) {
+    res.status(401).json({ success: false, error: 'Missing Authorization bearer token' });
+    return null;
+  }
+
+  let decoded;
+  try {
+    decoded = await admin.auth().verifyIdToken(idToken);
+  } catch (error) {
+    res.status(401).json({ success: false, error: 'Invalid or expired token' });
+    return null;
+  }
+
+  const adminDoc = await db.collection('admins').doc(decoded.uid).get();
+  if (!adminDoc.exists || adminDoc.data().active === false) {
+    res.status(403).json({ success: false, error: 'Caller is not an admin' });
+    return null;
+  }
+
+  return decoded;
+}
+
+async function logAdminAction(adminUid, action, targetId, metadata) {
+  await db.collection('adminLogs').add({
+    adminUid,
+    action,
+    targetId,
+    metadata: metadata || {},
+    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+// Admin: set a user's password
+app.post('/api/admin/set-user-password', async (req, res) => {
+  try {
+    const caller = await requireAdmin(req, res);
+    if (!caller) return;
+
+    const { userId, newPassword } = req.body;
+
+    if (!userId || !newPassword) {
+      return res.status(400).json({ success: false, error: 'userId and newPassword are required' });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 8 characters' });
+    }
+
+    const userRecord = await admin.auth().getUser(userId);
+    const isGoogleUser = userRecord.providerData.some(p => p.providerId === 'google.com') &&
+      !userRecord.providerData.some(p => p.providerId === 'password');
+    if (isGoogleUser) {
+      return res.status(412).json({ success: false, error: 'Cannot set a password for Google sign-in accounts' });
+    }
+
+    await admin.auth().updateUser(userId, { password: newPassword });
+    await logAdminAction(caller.uid, 'set_user_password', userId, { userEmail: userRecord.email });
+
+    console.log(`🔑 Admin ${caller.uid} set a new password for user ${userId}`);
+    res.json({ success: true, email: userRecord.email });
+  } catch (error) {
+    if (error.code === 'auth/user-not-found') {
+      return res.status(404).json({ success: false, error: 'User not found in Firebase Auth' });
+    }
+    console.error('Error in /api/admin/set-user-password:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: permanently delete a user account (Auth record + users/{uid} document)
+app.post('/api/admin/delete-user', async (req, res) => {
+  try {
+    const caller = await requireAdmin(req, res);
+    if (!caller) return;
+
+    const { userId, reason } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'userId is required' });
+    }
+    if (userId === caller.uid) {
+      return res.status(400).json({ success: false, error: 'You cannot delete your own account' });
+    }
+
+    const targetAdminDoc = await db.collection('admins').doc(userId).get();
+    if (targetAdminDoc.exists) {
+      return res.status(403).json({ success: false, error: 'Cannot delete an admin account from here' });
+    }
+
+    let userEmail = null;
+    try {
+      const userRecord = await admin.auth().getUser(userId);
+      userEmail = userRecord.email;
+      await admin.auth().deleteUser(userId);
+    } catch (error) {
+      if (error.code !== 'auth/user-not-found') throw error;
+      // Auth record already gone — still clean up the Firestore profile below.
+    }
+
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (userDoc.exists) {
+      userEmail = userEmail || userDoc.data().email || null;
+      await db.collection('users').doc(userId).delete();
+    }
+
+    // Take the deleted user's items off the board without destroying the records.
+    const itemsSnap = await db.collection('items').where('userId', '==', userId).get();
+    const batch = db.batch();
+    itemsSnap.docs.forEach(docSnap => {
+      batch.update(docSnap.ref, {
+        status: 'deleted',
+        deletedBy: caller.uid,
+        deletedAt: admin.firestore.FieldValue.serverTimestamp(),
+        deleteReason: 'Account deleted by admin',
+      });
+    });
+    await batch.commit();
+
+    await logAdminAction(caller.uid, 'delete_user_account', userId, {
+      userEmail,
+      reason: reason || null,
+      itemsRemoved: itemsSnap.size,
+    });
+
+    console.log(`🗑️ Admin ${caller.uid} deleted user ${userId} (${userEmail || 'unknown email'})`);
+    res.json({ success: true, email: userEmail, itemsRemoved: itemsSnap.size });
+  } catch (error) {
+    console.error('Error in /api/admin/delete-user:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
@@ -281,6 +419,8 @@ app.get('/', (req, res) => {
       health: 'GET /health',
       sendNotification: 'POST /api/send-notification',
       sendBatch: 'POST /api/send-batch-notifications',
+      adminSetPassword: 'POST /api/admin/set-user-password',
+      adminDeleteUser: 'POST /api/admin/delete-user',
     },
   });
 });

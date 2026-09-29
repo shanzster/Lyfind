@@ -11,7 +11,7 @@ import {
   Timestamp,
   addDoc,
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
 import { notificationService } from './notificationService';
 
 export type AdminRole = 'super_admin';
@@ -391,6 +391,42 @@ export const adminService = {
       console.error('Error banning user:', error);
       throw error;
     }
+  },
+
+  // Calls the notification server (Firebase Admin SDK) with the signed-in admin's
+  // ID token; the server re-verifies the caller against admins/{uid}.
+  async callAdminApi(path: string, body: Record<string, unknown>): Promise<any> {
+    const baseUrl = import.meta.env.VITE_NOTIFICATION_SERVER_URL || 'http://localhost:3001';
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error('Not signed in');
+    }
+
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || `Request failed (${response.status})`);
+    }
+    return result;
+  },
+
+  // Set a user's password (server-side, requires the notification server)
+  async setUserPassword(userId: string, newPassword: string): Promise<{ email: string }> {
+    return this.callAdminApi('/api/admin/set-user-password', { userId, newPassword });
+  },
+
+  // Permanently delete a user account: Auth record, users/{uid} doc, and their items
+  async deleteUserAccount(userId: string, reason?: string): Promise<{ email: string | null; itemsRemoved: number }> {
+    return this.callAdminApi('/api/admin/delete-user', { userId, reason });
   },
 
   // Delete item

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, User, Mail, Calendar, Package, MessageSquare, 
-  Edit, Save, X, Key, UserX, Ban, Shield, AlertTriangle, Loader2
+  Edit, Save, X, Key, UserX, Ban, Shield, AlertTriangle, Loader2, Trash2, RefreshCw
 } from 'lucide-react';
 import AdminSidebar from '@/components/admin/AdminSidebar';
 import { useAdminAuth } from '@/contexts/AdminAuthContext';
@@ -11,7 +11,6 @@ import { db } from '@/lib/firebase';
 import { adminService } from '@/services/adminService';
 import { messageService } from '@/services/messageService';
 import { toast } from 'sonner';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 
 export default function UserDetails() {
   const { id } = useParams();
@@ -23,6 +22,9 @@ export default function UserDetails() {
   const [isEditing, setIsEditing] = useState(false);
   const [editedUser, setEditedUser] = useState<any>({});
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [showSuspendModal, setShowSuspendModal] = useState(false);
   const [showBanModal, setShowBanModal] = useState(false);
   const [suspendReason, setSuspendReason] = useState('');
@@ -138,61 +140,42 @@ export default function UserDetails() {
   const handleUpdatePassword = async () => {
     if (!user) return;
 
-    // Check if user signed in with Google
-    const isGoogleUser = user.providerData?.some((p: any) => p.providerId === 'google.com');
-    
-    if (isGoogleUser) {
-      toast.error('Cannot reset password for Google sign-in users');
+    if (newPassword.length < 8) {
+      toast.error('Password must be at least 8 characters');
       return;
     }
 
     setActionLoading(true);
     try {
-      // Call Cloud Function to reset password
-      const functions = getFunctions();
-      const resetPassword = httpsCallable(functions, 'resetUserPassword');
-      
-      const result = await resetPassword({ userId: user.uid });
-      
-      if (result.data && (result.data as any).success) {
-        toast.success('Password reset successfully!');
-        toast.info(`New password sent to ${(result.data as any).email}`);
-        
-        setShowPasswordModal(false);
-      } else {
-        throw new Error('Password reset failed');
-      }
+      await adminService.setUserPassword(user.uid, newPassword);
+      toast.success(`Password changed for ${user.email}`);
+      toast.info('Share the new password with the user securely');
+      setShowPasswordModal(false);
+      setNewPassword('');
     } catch (error: any) {
       console.error('Error updating password:', error);
-      
-      // Handle specific error cases
-      if (error.code === 'functions/not-found') {
-        toast.error('Cloud Function not deployed. Please deploy resetUserPassword function.');
-        
-        // Fallback: Generate password locally and show it
-        const generatedPassword = generatePassword();
-        toast.warning(`Generated password (not saved): ${generatedPassword}`);
-        toast.info('Deploy Cloud Function to enable password reset');
-        
-        // Log the action anyway
-        if (adminProfile) {
-          await adminService.logAdminAction(
-            adminProfile.uid,
-            'reset_user_password_attempted',
-            id!,
-            { 
-              note: 'Password reset attempted but Cloud Function not available',
-              email: user.email
-            }
-          );
-        }
-      } else if (error.code === 'functions/permission-denied') {
-        toast.error('You do not have permission to reset passwords');
-      } else if (error.code === 'functions/failed-precondition') {
-        toast.error(error.message || 'Cannot reset password for this user');
-      } else {
-        toast.error('Failed to reset password: ' + (error.message || 'Unknown error'));
-      }
+      toast.error('Failed to change password: ' + (error.message || 'Unknown error'));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+
+    if (deleteConfirmText !== user.email) {
+      toast.error("Type the user's email to confirm deletion");
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const result = await adminService.deleteUserAccount(user.uid, 'Deleted from admin user details');
+      toast.success(`Account deleted (${result.itemsRemoved} item(s) taken off the board)`);
+      navigate('/admin/users');
+    } catch (error: any) {
+      console.error('Error deleting account:', error);
+      toast.error('Failed to delete account: ' + (error.message || 'Unknown error'));
     } finally {
       setActionLoading(false);
     }
@@ -356,7 +339,7 @@ export default function UserDetails() {
                       className="px-4 py-2 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 font-medium transition-all flex items-center gap-2"
                     >
                       <Key className="w-4 h-4" />
-                      Reset Password
+                      Change Password
                     </button>
                     <button
                       onClick={() => setShowSuspendModal(true)}
@@ -374,6 +357,13 @@ export default function UserDetails() {
                     </button>
                   </>
                 )}
+                <button
+                  onClick={() => setShowDeleteModal(true)}
+                  className="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-medium transition-all flex items-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete Account
+                </button>
               </div>
             </div>
           </div>
@@ -635,7 +625,7 @@ export default function UserDetails() {
                 <Key className="w-6 h-6 text-blue-400" />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-white">Reset Password</h3>
+                <h3 className="text-xl font-bold text-white">Change Password</h3>
                 <p className="text-sm text-white/60">{user.displayName}</p>
               </div>
             </div>
@@ -644,7 +634,7 @@ export default function UserDetails() {
               <>
                 <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20 mb-6">
                   <p className="text-sm text-yellow-200">
-                    ⚠️ This user signed in with Google. Password reset is not available for Google accounts.
+                    ⚠️ This user signed in with Google. Password change is not available for Google accounts.
                   </p>
                 </div>
 
@@ -657,24 +647,33 @@ export default function UserDetails() {
               </>
             ) : (
               <>
-                <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 mb-6">
-                  <p className="text-sm text-blue-200 mb-3">
-                    ℹ️ A secure password will be automatically generated and emailed to the user.
+                <div className="p-4 rounded-xl bg-white/5 border border-white/10 mb-6">
+                  <p className="text-sm text-white/80">
+                    <span className="text-white/60">Account:</span> {user.email}
                   </p>
-                  <div className="space-y-2 text-xs text-blue-200/80">
-                    <p>• Password will be 12 characters long</p>
-                    <p>• Contains uppercase, lowercase, numbers, and symbols</p>
-                    <p>• User will receive email with new password</p>
-                    <p>• User can change password after logging in</p>
-                  </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-white/5 border border-white/10 mb-6">
-                  <p className="text-sm text-white/80 mb-2">
-                    <span className="text-white/60">Email:</span> {user.email}
-                  </p>
-                  <p className="text-sm text-white/80">
-                    <span className="text-white/60">User will be notified via email</span>
+                <div className="mb-6">
+                  <label className="block text-white/70 text-sm mb-2">New Password</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="At least 8 characters"
+                      className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white font-mono placeholder:text-white/40 focus:outline-none focus:border-blue-500/50"
+                    />
+                    <button
+                      onClick={() => setNewPassword(generatePassword())}
+                      title="Generate a secure password"
+                      className="px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white transition-all flex items-center gap-2"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      Generate
+                    </button>
+                  </div>
+                  <p className="text-xs text-white/50 mt-2">
+                    The password is applied immediately. Copy it and share it with the user securely.
                   </p>
                 </div>
 
@@ -682,8 +681,7 @@ export default function UserDetails() {
                   <button
                     onClick={() => {
                       setShowPasswordModal(false);
-                      // setNewPassword('');
-                      // setConfirmPassword('');
+                      setNewPassword('');
                     }}
                     className="flex-1 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-medium transition-all"
                   >
@@ -691,14 +689,74 @@ export default function UserDetails() {
                   </button>
                   <button
                     onClick={handleUpdatePassword}
-                    disabled={actionLoading}
+                    disabled={actionLoading || newPassword.length < 8}
                     className="flex-1 px-4 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-medium transition-all disabled:opacity-50"
                   >
-                    {actionLoading ? 'Generating...' : 'Generate & Send'}
+                    {actionLoading ? 'Saving...' : 'Set Password'}
                   </button>
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Account Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="backdrop-blur-xl bg-[#2f1632] border border-white/10 rounded-3xl p-8 max-w-md w-full">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-12 h-12 rounded-xl bg-red-500/20 flex items-center justify-center">
+                <Trash2 className="w-6 h-6 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white">Delete Account</h3>
+                <p className="text-sm text-white/60">{user.displayName}</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 mb-6">
+              <p className="text-sm text-red-200 mb-2">
+                ⚠️ This permanently deletes the account and cannot be undone:
+              </p>
+              <ul className="text-xs text-red-200/80 space-y-1 list-disc pl-4">
+                <li>Login credentials are removed from Firebase Auth</li>
+                <li>The user profile is deleted</li>
+                <li>All their posted items are taken off the board</li>
+              </ul>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-white/70 text-sm mb-2">
+                Type <span className="font-mono text-white">{user.email}</span> to confirm
+              </label>
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder={user.email}
+                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white font-mono placeholder:text-white/30 focus:outline-none focus:border-red-500/50"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setDeleteConfirmText('');
+                }}
+                className="flex-1 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-medium transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={actionLoading || deleteConfirmText !== user.email}
+                className="flex-1 px-4 py-3 rounded-xl bg-red-500 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-50"
+              >
+                {actionLoading ? 'Deleting...' : 'Delete Forever'}
+              </button>
+            </div>
           </div>
         </div>
       )}
