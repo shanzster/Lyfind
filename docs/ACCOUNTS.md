@@ -47,6 +47,24 @@ Reset: node scripts/seed-teacher.js
 
 Reset: node scripts/seed-custodian.js
 
+## Admin: change a user's password / delete an account
+
+Admin → Users → open a user (/admin/users/:id):
+
+- **Change Password**: type a new password (or click Generate), then Set Password.
+  It is applied immediately in Firebase Auth — copy it and hand it to the student
+  securely. Not available for Google sign-in accounts.
+- **Delete Account**: type the user's email to confirm, then Delete Forever. This
+  permanently removes the Firebase Auth login and the user profile, and takes all
+  of the user's posted items off the board. Admin accounts (and yourself) cannot
+  be deleted this way.
+
+Both actions go through the notification server (`notification-server/server.js`,
+`VITE_NOTIFICATION_SERVER_URL`), which verifies the caller's admin ID token against
+`admins/{uid}` and records everything in the adminLogs audit trail. The Render
+notification server must be running the current `server.js` for these buttons to
+work. The old `functions/resetUserPassword.js` Cloud Function is unused.
+
 ## How to create and log in as a Student
 
 1. Go to https://lyfind-72845.web.app/register
