@@ -182,6 +182,12 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── Mailing list (admin-imported CSV/Excel recipients) ────────────────
+    // Personal data of students who may not even have accounts: admin only.
+    match /mailingList/{recipientId} {
+      allow read, write: if isAdmin();
+    }
+
     // ── Campus announcements ──────────────────────────────────────────────
     match /announcements/{announcementId} {
       allow read: if isSignedIn();

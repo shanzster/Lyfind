@@ -39,6 +39,12 @@ Reset: node scripts/seed-teacher.js
 4. From the dashboard: "Log New Item" records a turned-in item (photo, name, category, description, finder's name + student ID, where/when found) in the guard intake log — it is NOT posted publicly. Admins see it under Admin → Guard Station Intake and use "Post to board" to publish it as a found item (tagged "Held at Guard Station"). "Claimed" on a held item opens the pickup form (claimer name + student ID + note), records it in the permanent pickup log, and resolves the public post if one exists.
 5. Admins can also post any item themselves from Admin → Items → "Post Item" (/admin/post).
 
+## Announcement email blasts (Brevo)
+
+1. Admin → Mailing List (/admin/mailing-list): import a .csv/.xlsx with columns Name, Course, Student Number, Email (header names are auto-detected; only Email is required). Re-importing the same email updates that row.
+2. Admin → Announcements: tick "Also email to the mailing list" when publishing, or click "Email" / "Resend" on an existing announcement. Each recipient gets a personalised email via Brevo; the announcement shows how many were sent.
+3. Needs VITE_BREVO_API_KEY and VITE_BREVO_SENDER_EMAIL in .env. Brevo's free tier allows ~300 emails/day.
+
 Reset: node scripts/seed-custodian.js
 
 ## How to create and log in as a Student

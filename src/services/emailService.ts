@@ -748,5 +748,95 @@ export const emailService = {
         message: 'Failed to send credentials email'
       };
     }
+  },
+
+  // ── Announcement blast ──────────────────────────────────────────────────
+  // Sends one personalised email per recipient using Brevo's messageVersions
+  // batching (many versions per API call). Failures in one chunk do not stop
+  // the rest; the caller gets sent/failed totals.
+  async sendAnnouncementBlast(
+    announcement: { title: string; message: string; priority?: string },
+    recipients: { email: string; name: string }[],
+    onProgress?: (sent: number, total: number) => void
+  ): Promise<{ sent: number; failed: number; errors: string[] }> {
+    if (!brevoApiKey) {
+      throw new Error('Brevo API key is not configured (VITE_BREVO_API_KEY)');
+    }
+
+    const CHUNK = 50; // versions per API request (Brevo allows up to 2000 recipients per call)
+    const appUrl = import.meta.env?.VITE_APP_URL || 'https://lyfind-72845.web.app';
+    const sender = {
+      name: 'LyFind',
+      email: import.meta.env?.VITE_BREVO_SENDER_EMAIL || 'noreply@lyfind.com',
+    };
+    const escapeHtml = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const priorityLabel =
+      announcement.priority === 'urgent' ? '🚨 Urgent' :
+      announcement.priority === 'warning' ? '⚠️ Notice' : '📢 Announcement';
+    const accent =
+      announcement.priority === 'urgent' ? '#dc2626' :
+      announcement.priority === 'warning' ? '#d97706' : '#ff7400';
+    const bodyHtml = escapeHtml(announcement.message).replace(/\n/g, '<br />');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /></head>
+      <body style="margin:0;padding:0;background:#f4f4f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+        <div style="max-width:600px;margin:0 auto;padding:32px 16px;">
+          <div style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);">
+            <div style="background:#2f1632;padding:24px 32px;">
+              <p style="margin:0;color:#ffffff;font-size:22px;font-weight:700;">LyFind</p>
+              <p style="margin:4px 0 0;color:rgba(255,255,255,0.6);font-size:13px;">Campus Lost &amp; Found</p>
+            </div>
+            <div style="padding:32px;">
+              <p style="margin:0 0 8px;display:inline-block;padding:4px 10px;border-radius:999px;background:${accent}1a;color:${accent};font-size:12px;font-weight:600;">${priorityLabel}</p>
+              <h1 style="margin:12px 0 8px;color:#111827;font-size:22px;">${escapeHtml(announcement.title)}</h1>
+              <p style="margin:0 0 20px;color:#6b7280;font-size:14px;">Hi {{params.name}},</p>
+              <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.6;">${bodyHtml}</p>
+              <a href="${appUrl}" style="display:inline-block;background:${accent};color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;font-size:14px;">Open LyFind</a>
+            </div>
+            <div style="padding:16px 32px;background:#f9fafb;color:#9ca3af;font-size:12px;">
+              You received this because you are on the LyFind campus mailing list.
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    const text = `${priorityLabel}\n\n${announcement.title}\n\nHi {{params.name}},\n\n${announcement.message}\n\nOpen LyFind: ${appUrl}`;
+
+    let sent = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (let i = 0; i < recipients.length; i += CHUNK) {
+      const chunk = recipients.slice(i, i + CHUNK);
+      // Local SDK typings omit textContent/messageVersions; both are supported by the API
+      const email: any = new SibApiV3Sdk.SendSmtpEmail();
+      email.sender = sender;
+      email.subject = `${announcement.title} — LyFind`;
+      email.htmlContent = html;
+      email.textContent = text;
+      email.messageVersions = chunk.map((r) => ({
+        to: [{ email: r.email, name: r.name }],
+        params: { name: r.name || r.email.split('@')[0] },
+      }));
+
+      try {
+        await apiInstance.sendTransacEmail(email);
+        sent += chunk.length;
+      } catch (error: any) {
+        failed += chunk.length;
+        const detail = error?.response?.text || error?.response?.body?.message || error?.message || 'Unknown error';
+        console.error('[EmailService] Announcement chunk failed:', detail);
+        errors.push(String(detail));
+        if (error?.statusCode === 401) break; // bad key: no point continuing
+      }
+      onProgress?.(sent + failed, recipients.length);
+    }
+
+    return { sent, failed, errors };
   }
 };

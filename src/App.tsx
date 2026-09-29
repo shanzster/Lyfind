@@ -55,6 +55,7 @@ const TeacherVerifications = lazy(() => import('@/pages/admin/TeacherVerificatio
 const AdminAnnouncements = lazy(() => import('@/pages/admin/Announcements'));
 const AdminGuardIntake = lazy(() => import('@/pages/admin/GuardIntake'));
 const AdminPostItem = lazy(() => import('@/pages/admin/PostItem'));
+const AdminMailingList = lazy(() => import('@/pages/admin/MailingList'));
 
 // Utility pages (lazy)
 const SeedAdmin = lazy(() => import('@/pages/SeedAdmin'));
@@ -241,6 +242,7 @@ export default function App() {
               <Route path="/admin/logs" element={<AdminRoute><ActivityLogs /></AdminRoute>} />
               <Route path="/admin/settings" element={<AdminRoute><Settings /></AdminRoute>} />
               <Route path="/admin/announcements" element={<AdminRoute><AdminAnnouncements /></AdminRoute>} />
+              <Route path="/admin/mailing-list" element={<AdminRoute><AdminMailingList /></AdminRoute>} />
               <Route path="/admin/teacher-verifications" element={<AdminRoute><TeacherVerifications /></AdminRoute>} />
 
               {/* 404 catch-all */}

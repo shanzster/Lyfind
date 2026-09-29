@@ -13,7 +13,8 @@ import {
   Sparkles,
   GraduationCap,
   Megaphone,
-  Building2
+  Building2,
+  Mail
 } from 'lucide-react';
 import { useAdminAuth } from '@/contexts/AdminAuthContext';
 
@@ -100,6 +101,12 @@ export default function AdminSidebar() {
       icon: Megaphone,
       label: 'Announcements',
       path: '/admin/announcements',
+      permission: 'settings.edit'
+    },
+    {
+      icon: Mail,
+      label: 'Mailing List',
+      path: '/admin/mailing-list',
       permission: 'settings.edit'
     },
     {

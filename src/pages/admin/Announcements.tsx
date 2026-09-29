@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Megaphone, Trash2, Loader2, Plus } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Megaphone, Trash2, Loader2, Plus, Mail, Send } from 'lucide-react';
 import AdminSidebar from '@/components/admin/AdminSidebar';
 import { useAdminAuth } from '@/contexts/AdminAuthContext';
 import {
@@ -7,6 +8,9 @@ import {
   Announcement,
   AnnouncementPriority,
 } from '@/services/announcementService';
+import { mailingListService, MailingRecipient } from '@/services/mailingListService';
+import { emailService } from '@/services/emailService';
+import { adminService } from '@/services/adminService';
 import { toast } from 'sonner';
 
 const priorityStyles: Record<AnnouncementPriority, string> = {
@@ -26,6 +30,13 @@ export default function Announcements() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Email blast state
+  const [recipients, setRecipients] = useState<MailingRecipient[] | null>(null);
+  const [sendEmailOnPublish, setSendEmailOnPublish] = useState(false);
+  const [emailTarget, setEmailTarget] = useState<Announcement | null>(null);
+  const [emailing, setEmailing] = useState(false);
+  const [emailProgress, setEmailProgress] = useState<{ done: number; total: number } | null>(null);
+
   useEffect(() => {
     announcementService
       .getAll()
@@ -35,7 +46,58 @@ export default function Announcements() {
         toast.error('Failed to load announcements');
       })
       .finally(() => setLoading(false));
+
+    mailingListService
+      .getAll()
+      .then(setRecipients)
+      .catch((error) => {
+        console.error('Error loading mailing list:', error);
+        setRecipients([]);
+      });
   }, []);
+
+  const recipientCount = recipients?.length ?? 0;
+  const emailConfigured = emailService.isConfigured();
+
+  // Send an announcement to everyone on the imported mailing list
+  const runEmailBlast = async (a: Announcement) => {
+    if (!user || !recipients || recipients.length === 0) {
+      toast.error('The mailing list is empty. Import recipients first.');
+      return;
+    }
+    if (!emailConfigured) {
+      toast.error('Brevo API key is not configured');
+      return;
+    }
+    setEmailing(true);
+    setEmailProgress({ done: 0, total: recipients.length });
+    try {
+      const result = await emailService.sendAnnouncementBlast(
+        { title: a.title, message: a.message, priority: a.priority },
+        recipients.map((r) => ({ email: r.email, name: r.name })),
+        (done, total) => setEmailProgress({ done, total })
+      );
+      await announcementService.markEmailed(a.id!, result, user.uid);
+      await adminService.logAdminAction(user.uid, 'email_announcement', a.id!, {
+        title: a.title,
+        sent: result.sent,
+        failed: result.failed,
+      });
+      if (result.failed === 0) {
+        toast.success(`Emailed ${result.sent} recipient${result.sent === 1 ? '' : 's'}`);
+      } else {
+        toast.warning(`Sent ${result.sent}, failed ${result.failed}. ${result.errors[0] || ''}`);
+      }
+      setAnnouncements(await announcementService.getAll());
+    } catch (error: any) {
+      console.error('Error emailing announcement:', error);
+      toast.error(error?.message || 'Failed to send emails');
+    } finally {
+      setEmailing(false);
+      setEmailProgress(null);
+      setEmailTarget(null);
+    }
+  };
 
   const resetForm = () => {
     setTitle('');
@@ -61,7 +123,7 @@ export default function Announcements() {
         });
         toast.success('Announcement updated!');
       } else {
-        await announcementService.create(
+        const id = await announcementService.create(
           title,
           message,
           user.uid,
@@ -70,10 +132,16 @@ export default function Announcements() {
           expiresAt ? new Date(expiresAt) : null
         );
         toast.success('Announcement published!');
+        if (sendEmailOnPublish) {
+          const created = { id, title: title.trim(), message: message.trim(), priority } as Announcement;
+          setSaving(false);
+          await runEmailBlast(created);
+        }
       }
 
       setAnnouncements(await announcementService.getAll());
       resetForm();
+      setSendEmailOnPublish(false);
     } catch (error) {
       console.error('Error saving announcement:', error);
       toast.error(editingId ? 'Failed to update announcement' : 'Failed to publish announcement');
@@ -175,10 +243,35 @@ export default function Announcements() {
                   title="Optional expiry date"
                 />
               </div>
+              {!editingId && (
+                <label className="flex items-start gap-3 p-3 rounded-xl bg-white/5 border border-white/10 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sendEmailOnPublish}
+                    onChange={(e) => setSendEmailOnPublish(e.target.checked)}
+                    disabled={saving || emailing || recipientCount === 0 || !emailConfigured}
+                    className="mt-0.5 w-4 h-4 accent-[#ff7400]"
+                  />
+                  <span className="text-sm text-white/80">
+                    <span className="inline-flex items-center gap-1.5 font-medium text-white">
+                      <Mail className="w-4 h-4 text-[#ff7400]" /> Also email to the mailing list
+                    </span>
+                    <span className="block text-xs text-white/50 mt-0.5">
+                      {recipients === null
+                        ? 'Loading recipients…'
+                        : recipientCount === 0
+                          ? <>No recipients yet. <Link to="/admin/mailing-list" className="text-[#ff7400] underline">Import a CSV or Excel file</Link>.</>
+                          : !emailConfigured
+                            ? 'Brevo API key is not configured, so emails cannot be sent.'
+                            : `${recipientCount} recipient${recipientCount === 1 ? '' : 's'} on the list · sent via Brevo`}
+                    </span>
+                  </span>
+                </label>
+              )}
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   onClick={handleCreate}
-                  disabled={saving || !title.trim() || !message.trim()}
+                  disabled={saving || emailing || !title.trim() || !message.trim()}
                   className="px-6 py-3 rounded-xl bg-[#ff7400] hover:bg-[#ff8500] text-white font-medium transition-all disabled:opacity-50 flex items-center gap-2"
                 >
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
@@ -229,8 +322,25 @@ export default function Announcements() {
                         {getAnnouncementState(a) === 'Live' ? '🟢 Live' : getAnnouncementState(a) === 'Expired' ? '⏰ Expired' : '⚪ Hidden'}
                         {a.expiresAt ? ` · Expires ${a.expiresAt.toDate().toLocaleString()}` : ''}
                       </p>
+                      {a.emailedAt && (
+                        <p className="text-xs mt-1 inline-flex items-center gap-1 text-green-300">
+                          <Mail className="w-3 h-3" />
+                          Emailed to {a.emailedCount ?? 0}
+                          {a.emailFailedCount ? ` (${a.emailFailedCount} failed)` : ''} ·{' '}
+                          {a.emailedAt.toDate().toLocaleString()}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => setEmailTarget(a)}
+                        disabled={emailing}
+                        title={a.emailedAt ? 'Send again' : 'Email to mailing list'}
+                        className="px-3 py-1.5 rounded-lg bg-[#ff7400]/20 hover:bg-[#ff7400]/30 text-[#ffb070] text-xs font-medium transition-all inline-flex items-center gap-1 disabled:opacity-50"
+                      >
+                        <Mail className="w-3.5 h-3.5" />
+                        {a.emailedAt ? 'Resend' : 'Email'}
+                      </button>
                       <button
                         onClick={() => handleEdit(a)}
                         className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium transition-all"
@@ -257,6 +367,79 @@ export default function Announcements() {
           )}
         </div>
       </main>
+
+      {/* Email confirm / progress modal */}
+      {emailTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="backdrop-blur-xl bg-[#2f1632] border border-white/10 rounded-3xl p-8 max-w-md w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-xl bg-[#ff7400]/20 flex items-center justify-center">
+                <Send className="w-6 h-6 text-[#ff7400]" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-xl font-bold text-white">Email this announcement?</h3>
+                <p className="text-sm text-white/60 truncate">{emailTarget.title}</p>
+              </div>
+            </div>
+
+            {emailing && emailProgress ? (
+              <div className="mb-6">
+                <p className="text-white/70 text-sm mb-2">
+                  Sending {emailProgress.done}/{emailProgress.total}…
+                </p>
+                <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full bg-[#ff7400] transition-all"
+                    style={{ width: `${(emailProgress.done / Math.max(emailProgress.total, 1)) * 100}%` }}
+                  />
+                </div>
+                <p className="text-white/40 text-xs mt-2">Keep this tab open until it finishes.</p>
+              </div>
+            ) : (
+              <div className="mb-6 space-y-2 text-sm text-white/70">
+                <p>
+                  This sends a personalised email to all{' '}
+                  <span className="text-white font-medium">{recipientCount}</span> people on the mailing list
+                  through Brevo.
+                </p>
+                {emailTarget.emailedAt && (
+                  <p className="text-amber-200/80">
+                    Already emailed on {emailTarget.emailedAt.toDate().toLocaleString()}. Sending again will
+                    email everyone a second time.
+                  </p>
+                )}
+                {recipientCount === 0 && (
+                  <p className="text-red-300">
+                    The mailing list is empty.{' '}
+                    <Link to="/admin/mailing-list" className="underline">Import recipients</Link> first.
+                  </p>
+                )}
+                {!emailConfigured && (
+                  <p className="text-red-300">Brevo API key is not configured.</p>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setEmailTarget(null)}
+                disabled={emailing}
+                className="flex-1 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-medium transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => runEmailBlast(emailTarget)}
+                disabled={emailing || recipientCount === 0 || !emailConfigured}
+                className="flex-1 px-4 py-3 rounded-xl bg-[#ff7400] hover:bg-[#ff8500] text-white font-medium transition-all disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              >
+                {emailing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {emailing ? 'Sending…' : `Send to ${recipientCount}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

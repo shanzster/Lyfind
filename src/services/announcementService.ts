@@ -25,6 +25,11 @@ export interface Announcement {
   createdBy: string;
   createdByName: string;
   createdAt: Timestamp;
+  // Email blast bookkeeping (set when sent to the imported mailing list)
+  emailedAt?: Timestamp;
+  emailedCount?: number;
+  emailFailedCount?: number;
+  emailedBy?: string;
 }
 
 const ANNOUNCEMENTS_COLLECTION = 'announcements';
@@ -118,6 +123,19 @@ export const announcementService = {
       const all = await this.getAll();
       return all.find((a) => isAnnouncementCurrentlyActive(a)) || null;
     }
+  },
+
+  async markEmailed(
+    id: string,
+    result: { sent: number; failed: number },
+    adminUid: string
+  ): Promise<void> {
+    await updateDoc(doc(db, ANNOUNCEMENTS_COLLECTION, id), {
+      emailedAt: Timestamp.now(),
+      emailedCount: result.sent,
+      emailFailedCount: result.failed,
+      emailedBy: adminUid,
+    });
   },
 
   async setActive(id: string, active: boolean): Promise<void> {
