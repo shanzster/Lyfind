@@ -1,15 +1,31 @@
 import { useState } from 'react'
-import { MapPin, Navigation } from 'lucide-react'
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
+import { MapPin } from 'lucide-react'
+
+// Lyceum of Subic Bay — Rizal Highway, Subic Bay Freeport Zone
+const CAMPUS_CENTER: [number, number] = [14.8237, 120.2789]
+
+type Location = {
+  id: string
+  name: string
+  lat: number
+  lng: number
+  items: number
+  color: string // tailwind bg class for legend/chips
+  hex: string // hex for the map marker
+}
 
 export default function CampusMapDemo() {
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null)
 
-  const locations = [
-    { id: 'library', name: 'Library', x: 30, y: 40, items: 12, color: 'bg-blue-500' },
-    { id: 'cafeteria', name: 'Cafeteria', x: 60, y: 30, items: 8, color: 'bg-green-500' },
-    { id: 'gym', name: 'Gym', x: 75, y: 60, items: 5, color: 'bg-purple-500' },
-    { id: 'parking', name: 'Parking Lot', x: 20, y: 75, items: 15, color: 'bg-orange-500' },
-    { id: 'auditorium', name: 'Auditorium', x: 50, y: 70, items: 3, color: 'bg-pink-500' }
+  const locations: Location[] = [
+    { id: 'library', name: 'Library', lat: 14.82405, lng: 120.27845, items: 12, color: 'bg-blue-500', hex: '#3b82f6' },
+    { id: 'cafeteria', name: 'Cafeteria', lat: 14.82425, lng: 120.27925, items: 8, color: 'bg-green-500', hex: '#22c55e' },
+    { id: 'gym', name: 'Gym', lat: 14.82350, lng: 120.27955, items: 5, color: 'bg-purple-500', hex: '#a855f7' },
+    { id: 'parking', name: 'Parking Lot', lat: 14.82320, lng: 120.27830, items: 15, color: 'bg-orange-500', hex: '#f97316' },
+    { id: 'auditorium', name: 'Auditorium', lat: 14.82330, lng: 120.27905, items: 3, color: 'bg-pink-500', hex: '#ec4899' }
   ]
 
   const recentItems = [
@@ -18,15 +34,17 @@ export default function CampusMapDemo() {
     { name: 'Water Bottle', location: 'Gym', time: '1 hour ago', emoji: '💧' }
   ]
 
+  const selected = locations.find((l) => l.id === selectedLocation) ?? null
+
   return (
     <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-3xl p-8">
       <div className="flex items-center gap-3 mb-6">
         <div className="w-12 h-12 bg-[#ff7400]/20 rounded-xl flex items-center justify-center">
-          <Navigation className="w-6 h-6 text-[#ff7400]" />
+          <MapPin className="w-6 h-6 text-[#ff7400]" />
         </div>
         <div>
           <h3 className="text-2xl font-normal text-white">Campus Map Integration</h3>
-          <p className="text-white/50 text-sm">Interactive map of lost & found items</p>
+          <p className="text-white/50 text-sm">Interactive map of lost &amp; found items</p>
         </div>
       </div>
 
@@ -38,42 +56,37 @@ export default function CampusMapDemo() {
             <span className="text-[#ff7400] text-sm">{locations.reduce((sum, loc) => sum + loc.items, 0)} items</span>
           </div>
 
-          {/* Interactive Map */}
-          <div className="relative aspect-square bg-gradient-to-br from-[#2f1632] to-[#1a0d1c] rounded-xl border border-white/10 overflow-hidden">
-            {/* Grid lines */}
-            <div className="absolute inset-0 opacity-20">
-              <div className="grid grid-cols-4 grid-rows-4 h-full">
-                {[...Array(16)].map((_, i) => (
-                  <div key={i} className="border border-white/10"></div>
-                ))}
-              </div>
-            </div>
+          {/* Real interactive map */}
+          <div className="relative aspect-square rounded-xl border border-white/10 overflow-hidden z-0">
+            <MapContainer
+              center={CAMPUS_CENTER}
+              zoom={17}
+              scrollWheelZoom={false}
+              className="h-full w-full"
+              style={{ background: '#1a0d1c' }}
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              />
 
-            {/* Location Markers */}
-            {locations.map((location) => (
-              <button
-                key={location.id}
-                onClick={() => setSelectedLocation(location.id)}
-                className="absolute group"
-                style={{ left: `${location.x}%`, top: `${location.y}%`, transform: 'translate(-50%, -50%)' }}
-              >
-                {/* Pulse animation */}
-                <div className={`absolute inset-0 ${location.color} rounded-full opacity-30 animate-ping`}></div>
-                
-                {/* Marker */}
-                <div className={`relative w-8 h-8 ${location.color} rounded-full flex items-center justify-center shadow-lg group-hover:scale-125 transition-transform`}>
-                  <MapPin className="w-4 h-4 text-white" />
-                </div>
+              {locations.map((location) => (
+                <Marker
+                  key={location.id}
+                  position={[location.lat, location.lng]}
+                  icon={createPinIcon(location.hex, selectedLocation === location.id)}
+                  eventHandlers={{ click: () => setSelectedLocation(location.id) }}
+                >
+                  <Popup>
+                    <strong>{location.name}</strong>
+                    <br />
+                    {location.items} items
+                  </Popup>
+                </Marker>
+              ))}
 
-                {/* Label */}
-                <div className={`absolute top-full mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap px-2 py-1 bg-black/80 rounded text-xs text-white opacity-0 group-hover:opacity-100 transition-opacity ${
-                  selectedLocation === location.id ? 'opacity-100' : ''
-                }`}>
-                  {location.name}
-                  <div className="text-[#ff7400]">{location.items} items</div>
-                </div>
-              </button>
-            ))}
+              <FlyToSelected location={selected} />
+            </MapContainer>
           </div>
 
           {/* Legend */}
@@ -139,4 +152,44 @@ export default function CampusMapDemo() {
       </div>
     </div>
   )
+}
+
+// Pan/zoom the map to the selected building
+function FlyToSelected({ location }: { location: Location | null }) {
+  const map = useMap()
+  if (location) {
+    map.flyTo([location.lat, location.lng], 18, { duration: 0.75 })
+  }
+  return null
+}
+
+// Build a colored teardrop pin as a Leaflet divIcon
+const iconCache = new Map<string, L.DivIcon>()
+function createPinIcon(hex: string, active: boolean): L.DivIcon {
+  const key = `${hex}-${active}`
+  const cached = iconCache.get(key)
+  if (cached) return cached
+
+  const size = active ? 38 : 30
+  const html = `
+    <div style="position:relative;width:${size}px;height:${size}px;transform:translateY(-${size / 2}px);">
+      ${active ? `<div style="position:absolute;inset:0;border-radius:9999px;background:${hex};opacity:.35;animation:lf-ping 1.2s cubic-bezier(0,0,.2,1) infinite;"></div>` : ''}
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+        background:${hex};border-radius:9999px;box-shadow:0 4px 10px rgba(0,0,0,.45);border:2px solid rgba(255,255,255,.85);">
+        <svg width="${size * 0.5}" height="${size * 0.5}" viewBox="0 0 24 24" fill="none"
+          stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+          <circle cx="12" cy="10" r="3"/>
+        </svg>
+      </div>
+    </div>`
+
+  const icon = L.divIcon({
+    html,
+    className: 'lf-pin-icon',
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size]
+  })
+  iconCache.set(key, icon)
+  return icon
 }

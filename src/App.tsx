@@ -61,6 +61,7 @@ const AdminMailingList = lazy(() => import('@/pages/admin/MailingList'));
 const SeedAdmin = lazy(() => import('@/pages/SeedAdmin'));
 const FixAdmin = lazy(() => import('@/pages/FixAdmin'));
 const OAuthDiagnostic = lazy(() => import('@/pages/OAuthDiagnostic'));
+const FloorPlanCalibrator = lazy(() => import('@/pages/FloorPlanCalibrator'));
 
 function LoadingFallback() {
   return (
@@ -200,6 +201,7 @@ export default function App() {
                   <Route path="/seed-admin" element={<SeedAdmin />} />
                   <Route path="/fix-admin" element={<FixAdmin />} />
                   <Route path="/oauth-diagnostic" element={<OAuthDiagnostic />} />
+                  <Route path="/calibrate-floorplans" element={<FloorPlanCalibrator />} />
                 </>
               )}
 

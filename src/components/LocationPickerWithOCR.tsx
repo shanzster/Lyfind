@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FloorPlanMap } from './FloorPlanMap';
 import { floorPlans, FloorPlan } from '@/lib/floorPlans';
-import { extractRoomNumber } from '@/lib/ocrService';
+import { extractRoomNumber, preloadOCR } from '@/lib/ocrService';
+import { resolveRoom, ocrAgreesWith } from '@/lib/floorPlanRooms';
+import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -36,6 +38,17 @@ export function LocationPickerWithOCR({ value, onChange }: LocationPickerProps) 
   } | null>(value ? { x: value.x, y: value.y, roomNumber: value.roomNumber } : null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [manualRoomNumber, setManualRoomNumber] = useState(value?.roomNumber || '');
+  // How the current room value was resolved + whether OCR corroborated it.
+  const [resolution, setResolution] = useState<
+    | { source: 'registry'; verification: 'pending' | 'verified' | 'mismatch'; ocrText?: string }
+    | { source: 'ocr' }
+    | null
+  >(null);
+
+  // Warm up the OCR engine in the background so the first click is responsive.
+  useEffect(() => {
+    void preloadOCR();
+  }, []);
 
   const handleFloorPlanChange = (floorPlanId: string) => {
     const floorPlan = floorPlans.find((fp) => fp.id === floorPlanId);
@@ -43,36 +56,59 @@ export function LocationPickerWithOCR({ value, onChange }: LocationPickerProps) 
       setSelectedFloorPlan(floorPlan);
       setTempLocation(null);
       setManualRoomNumber('');
+      setResolution(null);
     }
   };
 
   const handleLocationSelect = async (location: { x: number; y: number }) => {
-    setTempLocation({ ...location, roomNumber: undefined });
-    setIsExtracting(true);
+    // 1) Registry first — the defined room zones are ground truth.
+    const room = resolveRoom(selectedFloorPlan.id, location.x, location.y);
 
+    if (room) {
+      // Trust the registry immediately, then let OCR corroborate in the background.
+      setTempLocation({ ...location, roomNumber: room.display });
+      setManualRoomNumber(room.display);
+      setResolution({ source: 'registry', verification: 'pending' });
+
+      try {
+        const result = await extractRoomNumber(
+          selectedFloorPlan.imageUrl,
+          room.x, // OCR the zone's centre, not the loose click point
+          room.y,
+          120
+        );
+        const agrees = ocrAgreesWith(result.roomNumber ?? result.nearbyText.join(' '), room);
+        setResolution({
+          source: 'registry',
+          verification: agrees ? 'verified' : 'mismatch',
+          ocrText: result.roomNumber ?? result.nearbyText.join(' ') ?? '',
+        });
+      } catch {
+        // Verification is best-effort; the registry value still stands.
+        setResolution({ source: 'registry', verification: 'mismatch' });
+      }
+      return;
+    }
+
+    // 2) No defined zone nearby — fall back to live OCR of the click point.
+    setTempLocation({ ...location, roomNumber: undefined });
+    setResolution({ source: 'ocr' });
+    setIsExtracting(true);
     try {
-      // Extract room number using OCR
       const result = await extractRoomNumber(
         selectedFloorPlan.imageUrl,
         location.x,
         location.y,
-        50 // 50px radius
+        120 // larger crop so the whole label is captured, not a sliver of it
       );
 
       if (result.roomNumber) {
-        setTempLocation({
-          ...location,
-          roomNumber: result.roomNumber,
-        });
+        setTempLocation({ ...location, roomNumber: result.roomNumber });
         setManualRoomNumber(result.roomNumber);
       } else if (result.nearbyText.length > 0) {
-        // If no room number found, show nearby text as suggestion
         const suggestion = result.nearbyText[0];
         setManualRoomNumber(suggestion);
-        setTempLocation({
-          ...location,
-          roomNumber: suggestion,
-        });
+        setTempLocation({ ...location, roomNumber: suggestion });
       }
     } catch (error) {
       console.error('Failed to extract room number:', error);
@@ -95,6 +131,7 @@ export function LocationPickerWithOCR({ value, onChange }: LocationPickerProps) 
   const handleClear = () => {
     setTempLocation(null);
     setManualRoomNumber('');
+    setResolution(null);
   };
 
   return (
@@ -149,11 +186,32 @@ export function LocationPickerWithOCR({ value, onChange }: LocationPickerProps) 
               )}
             </div>
           </div>
-          <p className="text-xs text-gray-500">
-            {tempLocation.roomNumber
-              ? `Detected: ${tempLocation.roomNumber}`
-              : 'Room number will be auto-detected from the floor plan'}
-          </p>
+          {/* Status line: registry = ground truth (with OCR corroboration), else live OCR */}
+          {resolution?.source === 'registry' && resolution.verification === 'verified' && (
+            <p className="text-xs text-green-600 flex items-center gap-1">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Verified — matches the floor plan.
+            </p>
+          )}
+          {resolution?.source === 'registry' && resolution.verification === 'pending' && (
+            <p className="text-xs text-gray-500 flex items-center gap-1">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              From floor plan · double-checking…
+            </p>
+          )}
+          {resolution?.source === 'registry' && resolution.verification === 'mismatch' && (
+            <p className="text-xs text-amber-600 flex items-center gap-1">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Using the floor-plan label{resolution.ocrText ? ` (scan read “${resolution.ocrText}”)` : ''} — unverified.
+            </p>
+          )}
+          {resolution?.source === 'ocr' && (
+            <p className="text-xs text-gray-500">
+              {tempLocation.roomNumber
+                ? `Detected by scan: ${tempLocation.roomNumber} — please confirm it's correct.`
+                : 'No mapped room here — scanning the floor plan…'}
+            </p>
+          )}
         </div>
       )}
 
