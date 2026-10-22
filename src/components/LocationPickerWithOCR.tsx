@@ -1,11 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { FloorPlanMap } from './FloorPlanMap';
 import { floorPlans, FloorPlan } from '@/lib/floorPlans';
-import { extractRoomNumber, preloadOCR } from '@/lib/ocrService';
-import { resolveRoom, ocrAgreesWith } from '@/lib/floorPlanRooms';
-import { CheckCircle2, AlertTriangle } from 'lucide-react';
+import { extractRoomNumber, cropRegion } from '@/lib/ocrService';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -38,17 +36,9 @@ export function LocationPickerWithOCR({ value, onChange }: LocationPickerProps) 
   } | null>(value ? { x: value.x, y: value.y, roomNumber: value.roomNumber } : null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [manualRoomNumber, setManualRoomNumber] = useState(value?.roomNumber || '');
-  // How the current room value was resolved + whether OCR corroborated it.
-  const [resolution, setResolution] = useState<
-    | { source: 'registry'; verification: 'pending' | 'verified' | 'mismatch'; ocrText?: string }
-    | { source: 'ocr' }
-    | null
-  >(null);
-
-  // Warm up the OCR engine in the background so the first click is responsive.
-  useEffect(() => {
-    void preloadOCR();
-  }, []);
+  // Cropped-out section of the map around the click, shown so the user can
+  // verify they clicked the room they meant. Purely visual — no matching.
+  const [cropPreview, setCropPreview] = useState<string | null>(null);
 
   const handleFloorPlanChange = (floorPlanId: string) => {
     const floorPlan = floorPlans.find((fp) => fp.id === floorPlanId);
@@ -56,59 +46,45 @@ export function LocationPickerWithOCR({ value, onChange }: LocationPickerProps) 
       setSelectedFloorPlan(floorPlan);
       setTempLocation(null);
       setManualRoomNumber('');
-      setResolution(null);
+      setCropPreview(null);
     }
   };
 
   const handleLocationSelect = async (location: { x: number; y: number }) => {
-    // 1) Registry first — the defined room zones are ground truth.
-    const room = resolveRoom(selectedFloorPlan.id, location.x, location.y);
-
-    if (room) {
-      // Trust the registry immediately, then let OCR corroborate in the background.
-      setTempLocation({ ...location, roomNumber: room.display });
-      setManualRoomNumber(room.display);
-      setResolution({ source: 'registry', verification: 'pending' });
-
-      try {
-        const result = await extractRoomNumber(
-          selectedFloorPlan.imageUrl,
-          room.x, // OCR the zone's centre, not the loose click point
-          room.y,
-          120
-        );
-        const agrees = ocrAgreesWith(result.roomNumber ?? result.nearbyText.join(' '), room);
-        setResolution({
-          source: 'registry',
-          verification: agrees ? 'verified' : 'mismatch',
-          ocrText: result.roomNumber ?? result.nearbyText.join(' ') ?? '',
-        });
-      } catch {
-        // Verification is best-effort; the registry value still stands.
-        setResolution({ source: 'registry', verification: 'mismatch' });
-      }
-      return;
-    }
-
-    // 2) No defined zone nearby — fall back to live OCR of the click point.
     setTempLocation({ ...location, roomNumber: undefined });
-    setResolution({ source: 'ocr' });
+    setManualRoomNumber('');
+    setCropPreview(null);
     setIsExtracting(true);
+
+    // Show the cropped region immediately so the user can see what they clicked
+    // while OCR runs in the background.
+    cropRegion(selectedFloorPlan.imageUrl, location.x, location.y, 150)
+      .then((dataUrl) => setCropPreview(dataUrl))
+      .catch(() => setCropPreview(null));
+
     try {
+      // Extract room number using OCR
       const result = await extractRoomNumber(
         selectedFloorPlan.imageUrl,
         location.x,
         location.y,
-        120 // larger crop so the whole label is captured, not a sliver of it
+        50 // 50px radius
       );
 
       if (result.roomNumber) {
-        setTempLocation({ ...location, roomNumber: result.roomNumber });
+        setTempLocation({
+          ...location,
+          roomNumber: result.roomNumber,
+        });
         setManualRoomNumber(result.roomNumber);
       } else if (result.nearbyText.length > 0) {
+        // If no room number found, show nearby text as suggestion
         const suggestion = result.nearbyText[0];
         setManualRoomNumber(suggestion);
-        setTempLocation({ ...location, roomNumber: suggestion });
+        setTempLocation({
+          ...location,
+          roomNumber: suggestion,
+        });
       }
     } catch (error) {
       console.error('Failed to extract room number:', error);
@@ -131,7 +107,7 @@ export function LocationPickerWithOCR({ value, onChange }: LocationPickerProps) 
   const handleClear = () => {
     setTempLocation(null);
     setManualRoomNumber('');
-    setResolution(null);
+    setCropPreview(null);
   };
 
   return (
@@ -166,14 +142,34 @@ export function LocationPickerWithOCR({ value, onChange }: LocationPickerProps) 
         />
       </div>
 
-      {/* Room Number Input */}
+      {/* Verify card: cropped-out section of the map + editable OCR result */}
       {tempLocation && (
-        <div className="space-y-2">
-          <Label htmlFor="roomNumber">
-            Room Number {isExtracting && '(Detecting...)'}
-          </Label>
-          <div className="flex gap-2">
-            <div className="relative flex-1">
+        <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+          <div className="font-medium text-sm">
+            Is this the room you wanted to click? Please verify.
+          </div>
+
+          {/* Cropped section of the map around the click */}
+          <div className="flex justify-center">
+            {cropPreview ? (
+              <img
+                src={cropPreview}
+                alt="Selected area of the floor plan"
+                className="h-40 w-40 rounded-md border bg-white object-contain"
+              />
+            ) : (
+              <div className="flex h-40 w-40 items-center justify-center rounded-md border bg-white">
+                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+              </div>
+            )}
+          </div>
+
+          {/* Editable room number — pre-filled by OCR, correct it if it's wrong/gibberish */}
+          <div className="space-y-2">
+            <Label htmlFor="roomNumber">
+              Room / location {isExtracting && '(Detecting…)'}
+            </Label>
+            <div className="relative">
               <Input
                 id="roomNumber"
                 value={manualRoomNumber}
@@ -185,57 +181,29 @@ export function LocationPickerWithOCR({ value, onChange }: LocationPickerProps) 
                 <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-gray-400" />
               )}
             </div>
-          </div>
-          {/* Status line: registry = ground truth (with OCR corroboration), else live OCR */}
-          {resolution?.source === 'registry' && resolution.verification === 'verified' && (
-            <p className="text-xs text-green-600 flex items-center gap-1">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Verified — matches the floor plan.
-            </p>
-          )}
-          {resolution?.source === 'registry' && resolution.verification === 'pending' && (
-            <p className="text-xs text-gray-500 flex items-center gap-1">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              From floor plan · double-checking…
-            </p>
-          )}
-          {resolution?.source === 'registry' && resolution.verification === 'mismatch' && (
-            <p className="text-xs text-amber-600 flex items-center gap-1">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              Using the floor-plan label{resolution.ocrText ? ` (scan read “${resolution.ocrText}”)` : ''} — unverified.
-            </p>
-          )}
-          {resolution?.source === 'ocr' && (
             <p className="text-xs text-gray-500">
-              {tempLocation.roomNumber
-                ? `Detected by scan: ${tempLocation.roomNumber} — please confirm it's correct.`
-                : 'No mapped room here — scanning the floor plan…'}
+              {isExtracting
+                ? 'Reading the floor plan…'
+                : tempLocation.roomNumber
+                ? `Auto-detected "${tempLocation.roomNumber}". If this is wrong or looks like gibberish, type the correct room.`
+                : 'No room detected automatically — type the room number or name.'}
             </p>
-          )}
-        </div>
-      )}
-
-      {/* Location Info */}
-      {tempLocation && (
-        <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
-          <div className="font-medium mb-1">Selected Location:</div>
-          <div>Floor: {selectedFloorPlan.name}</div>
-          <div>
-            Coordinates: ({tempLocation.x.toFixed(1)}%, {tempLocation.y.toFixed(1)}%)
           </div>
-          {manualRoomNumber && <div>Room: {manualRoomNumber}</div>}
-        </div>
-      )}
 
-      {/* Actions */}
-      {tempLocation && (
-        <div className="flex gap-2">
-          <Button onClick={handleConfirm} className="flex-1" disabled={isExtracting}>
-            Confirm Location
-          </Button>
-          <Button onClick={handleClear} variant="outline" disabled={isExtracting}>
-            Clear
-          </Button>
+          <div className="text-xs text-gray-500">
+            Floor: {selectedFloorPlan.name} · Coordinates: ({tempLocation.x.toFixed(1)}%,{' '}
+            {tempLocation.y.toFixed(1)}%)
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2">
+            <Button onClick={handleConfirm} className="flex-1" disabled={isExtracting}>
+              Yes, confirm this location
+            </Button>
+            <Button onClick={handleClear} variant="outline" disabled={isExtracting}>
+              Clear
+            </Button>
+          </div>
         </div>
       )}
     </div>

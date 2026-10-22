@@ -49,6 +49,8 @@ export interface Item {
   // nested arrays. See itemFeatureCache.ts.
   aiFeatures?: { version: number; count: number; [k: string]: any };
   postedByFaculty?: boolean;
+  // Set when an admin posts the item on behalf of the platform (see admin/PostItem.tsx)
+  postedByAdmin?: boolean;
   // Guard Station module: item is physically held at the campus guard/SSO desk
   heldAtGuardStation?: boolean;
   // Lifecycle module: renewing bumps this so old-but-renewed items aren't archived

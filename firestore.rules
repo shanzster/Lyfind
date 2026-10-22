@@ -36,6 +36,17 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── Suspension appeals ────────────────────────────────────────────────
+    // A suspended user submits an appeal for their own account; admins review.
+    match /appeals/{appealId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update, delete: if isAdmin();
+    }
+
     // ── Items ─────────────────────────────────────────────────────────────
     // Public read (the /public/item/:id share + QR poster pages need it).
     // Writes: owner or admin. Exception: any signed-in user may write ONLY

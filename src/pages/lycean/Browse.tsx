@@ -591,7 +591,14 @@ export default function BrowsePage() {
                           }}
                         />
                         <div className="hidden lg:flex flex-col min-w-0">
-                          <span className="text-white/80 text-sm font-medium truncate">{item.userName}</span>
+                          <span className="text-white/80 text-sm font-medium truncate flex items-center gap-1.5">
+                            {item.userName}
+                            {item.postedByAdmin && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-[#ff7400]/20 border border-[#ff7400]/40 text-[#ffb366] text-[10px] font-medium flex-shrink-0">
+                                Admin
+                              </span>
+                            )}
+                          </span>
                           <span className="text-white/30 text-xs">{item.category}</span>
                         </div>
                       </div>

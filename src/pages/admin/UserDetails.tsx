@@ -2,15 +2,47 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, User, Mail, Calendar, Package, MessageSquare, 
-  Edit, Save, X, Key, UserX, Ban, Shield, AlertTriangle, Loader2, Trash2, RefreshCw
+  Edit, Save, X, Key, UserX, Ban, Shield, AlertTriangle, Loader2, Trash2, RefreshCw, FileText
 } from 'lucide-react';
 import AdminSidebar from '@/components/admin/AdminSidebar';
 import { useAdminAuth } from '@/contexts/AdminAuthContext';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { adminService } from '@/services/adminService';
+import { appealService, Appeal } from '@/services/appealService';
 import { messageService } from '@/services/messageService';
 import { toast } from 'sonner';
+
+// Predefined selectable options for moderation actions. "Other" reveals a
+// free-text field so admins can still type a custom reason when needed.
+const SUSPEND_REASONS = [
+  'Spam or advertising',
+  'Harassment or abusive behavior',
+  'Fake or misleading posts',
+  'Inappropriate or offensive content',
+  'Impersonation',
+  'Repeated policy violations',
+  'Other',
+];
+
+const BAN_REASONS = [
+  'Severe harassment or threats',
+  'Fraud or scam activity',
+  'Repeated violations after suspension',
+  'Impersonation of staff or others',
+  'Posting prohibited or illegal content',
+  'Other',
+];
+
+const SUSPEND_DURATIONS = [
+  { label: '1 day', value: 1 },
+  { label: '3 days', value: 3 },
+  { label: '7 days', value: 7 },
+  { label: '14 days', value: 14 },
+  { label: '30 days', value: 30 },
+  { label: '90 days', value: 90 },
+  { label: 'Indefinite', value: 0 },
+];
 
 export default function UserDetails() {
   const { id } = useParams();
@@ -28,9 +60,14 @@ export default function UserDetails() {
   const [showSuspendModal, setShowSuspendModal] = useState(false);
   const [showBanModal, setShowBanModal] = useState(false);
   const [suspendReason, setSuspendReason] = useState('');
+  const [suspendReasonOther, setSuspendReasonOther] = useState('');
   const [suspendDuration, setSuspendDuration] = useState(7);
   const [banReason, setBanReason] = useState('');
+  const [banReasonOther, setBanReasonOther] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  // Latest appeal from this user — a suspension can only be lifted once the user
+  // has submitted an appeal that is awaiting review.
+  const [userAppeal, setUserAppeal] = useState<Appeal | null>(null);
   
   // Messages modal state
   const [showMessagesModal, setShowMessagesModal] = useState(false);
@@ -97,6 +134,15 @@ export default function UserDetails() {
       const itemsSnap = await getDocs(itemsQuery);
       const items = itemsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setUserItems(items);
+
+      // Load this user's latest suspension appeal (if any)
+      try {
+        const appeal = await appealService.getLatestAppealForUser(id);
+        setUserAppeal(appeal);
+      } catch (e) {
+        console.warn('Failed to load user appeal:', e);
+        setUserAppeal(null);
+      }
     } catch (error) {
       console.error('Error loading user:', error);
       toast.error('Failed to load user details');
@@ -182,18 +228,20 @@ export default function UserDetails() {
   };
 
   const handleSuspend = async () => {
-    if (!adminProfile || !user || !suspendReason.trim()) {
-      toast.error('Please provide a suspension reason');
+    const reason = suspendReason === 'Other' ? suspendReasonOther.trim() : suspendReason;
+    if (!adminProfile || !user || !reason) {
+      toast.error('Please select a suspension reason');
       return;
     }
 
     setActionLoading(true);
     try {
-      await adminService.suspendUser(user.uid, adminProfile.uid, suspendReason, suspendDuration);
+      await adminService.suspendUser(user.uid, adminProfile.uid, reason, suspendDuration);
       toast.success('User suspended successfully');
       await loadUserDetails();
       setShowSuspendModal(false);
       setSuspendReason('');
+      setSuspendReasonOther('');
     } catch (error) {
       console.error('Error suspending user:', error);
       toast.error('Failed to suspend user');
@@ -202,19 +250,46 @@ export default function UserDetails() {
     }
   };
 
-  const handleBan = async () => {
-    if (!adminProfile || !user || !banReason.trim()) {
-      toast.error('Please provide a ban reason');
+  const handleUnsuspend = async () => {
+    if (!adminProfile || !user) return;
+
+    // A suspension can only be lifted after the user has submitted an appeal.
+    if (!userAppeal || userAppeal.status !== 'pending') {
+      toast.error('This user must submit an appeal before you can lift the suspension.');
       return;
     }
 
     setActionLoading(true);
     try {
-      await adminService.banUser(user.uid, adminProfile.uid, banReason);
+      await adminService.unsuspendUser(user.uid, adminProfile.uid);
+      if (userAppeal.id) {
+        await appealService.decideAppeal(userAppeal.id, adminProfile.uid, 'approved');
+      }
+      toast.success('Suspension lifted — user can log in again');
+      await loadUserDetails();
+    } catch (error) {
+      console.error('Error lifting suspension:', error);
+      toast.error('Failed to lift suspension');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleBan = async () => {
+    const reason = banReason === 'Other' ? banReasonOther.trim() : banReason;
+    if (!adminProfile || !user || !reason) {
+      toast.error('Please select a ban reason');
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      await adminService.banUser(user.uid, adminProfile.uid, reason);
       toast.success('User banned successfully');
       await loadUserDetails();
       setShowBanModal(false);
       setBanReason('');
+      setBanReasonOther('');
     } catch (error) {
       console.error('Error banning user:', error);
       toast.error('Failed to ban user');
@@ -504,6 +579,41 @@ export default function UserDetails() {
                           <span className="text-white/60">Until:</span> {user.suspendedUntil.toDate().toLocaleString()}
                         </p>
                       )}
+
+                      {/* Appeal status — a suspension can only be lifted after an appeal */}
+                      {userAppeal && userAppeal.status === 'pending' ? (
+                        <div className="mt-3 p-3 rounded-xl bg-white/5 border border-white/10">
+                          <p className="text-sm font-medium text-white mb-1">Appeal submitted</p>
+                          <p className="text-white/70 text-sm whitespace-pre-wrap mb-2">{userAppeal.reason}</p>
+                          <a
+                            href={userAppeal.pdfDataUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-sm font-medium text-[#ff7400] hover:underline"
+                          >
+                            <FileText className="w-4 h-4" /> View appeal PDF
+                          </a>
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-sm text-white/50">
+                          This user has not submitted an appeal yet. The suspension can only be
+                          lifted after an appeal is submitted.
+                        </p>
+                      )}
+
+                      <button
+                        onClick={handleUnsuspend}
+                        disabled={actionLoading || !userAppeal || userAppeal.status !== 'pending'}
+                        title={
+                          !userAppeal || userAppeal.status !== 'pending'
+                            ? 'User must submit an appeal first'
+                            : undefined
+                        }
+                        className="mt-3 px-4 py-2 rounded-xl bg-green-500/20 hover:bg-green-500/30 text-green-400 font-medium transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        Lift Suspension
+                      </button>
                     </div>
                   )}
 
@@ -777,27 +887,48 @@ export default function UserDetails() {
 
             <div className="space-y-4 mb-6">
               <div>
-                <label className="block text-white/70 text-sm mb-2">Duration (days)</label>
-                <input
-                  type="number"
+                <label className="block text-white/70 text-sm mb-2">Duration</label>
+                <select
                   value={suspendDuration}
                   onChange={(e) => setSuspendDuration(parseInt(e.target.value))}
-                  min="1"
-                  max="365"
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-yellow-500/50"
-                />
+                >
+                  {SUSPEND_DURATIONS.map((d) => (
+                    <option key={d.value} value={d.value} className="bg-[#2f1632]">
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
                 <label className="block text-white/70 text-sm mb-2">Reason</label>
-                <textarea
+                <select
                   value={suspendReason}
                   onChange={(e) => setSuspendReason(e.target.value)}
-                  rows={4}
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-500/50 resize-none"
-                  placeholder="Explain why this user is being suspended..."
-                />
+                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-yellow-500/50"
+                >
+                  <option value="" className="bg-[#2f1632]">Select a reason...</option>
+                  {SUSPEND_REASONS.map((r) => (
+                    <option key={r} value={r} className="bg-[#2f1632]">
+                      {r}
+                    </option>
+                  ))}
+                </select>
               </div>
+
+              {suspendReason === 'Other' && (
+                <div>
+                  <label className="block text-white/70 text-sm mb-2">Specify reason</label>
+                  <textarea
+                    value={suspendReasonOther}
+                    onChange={(e) => setSuspendReasonOther(e.target.value)}
+                    rows={3}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-500/50 resize-none"
+                    placeholder="Explain why this user is being suspended..."
+                  />
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3">
@@ -805,6 +936,7 @@ export default function UserDetails() {
                 onClick={() => {
                   setShowSuspendModal(false);
                   setSuspendReason('');
+                  setSuspendReasonOther('');
                 }}
                 className="flex-1 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-medium transition-all"
               >
@@ -812,7 +944,7 @@ export default function UserDetails() {
               </button>
               <button
                 onClick={handleSuspend}
-                disabled={actionLoading || !suspendReason.trim()}
+                disabled={actionLoading || !suspendReason || (suspendReason === 'Other' && !suspendReasonOther.trim())}
                 className="flex-1 px-4 py-3 rounded-xl bg-yellow-500 hover:bg-yellow-600 text-white font-medium transition-all disabled:opacity-50"
               >
                 {actionLoading ? 'Suspending...' : 'Suspend User'}
@@ -842,15 +974,35 @@ export default function UserDetails() {
               </p>
             </div>
 
-            <div className="mb-6">
-              <label className="block text-white/70 text-sm mb-2">Reason</label>
-              <textarea
-                value={banReason}
-                onChange={(e) => setBanReason(e.target.value)}
-                rows={4}
-                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-white/40 focus:outline-none focus:border-red-500/50 resize-none"
-                placeholder="Explain why this user is being banned..."
-              />
+            <div className="mb-6 space-y-4">
+              <div>
+                <label className="block text-white/70 text-sm mb-2">Reason</label>
+                <select
+                  value={banReason}
+                  onChange={(e) => setBanReason(e.target.value)}
+                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-red-500/50"
+                >
+                  <option value="" className="bg-[#2f1632]">Select a reason...</option>
+                  {BAN_REASONS.map((r) => (
+                    <option key={r} value={r} className="bg-[#2f1632]">
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {banReason === 'Other' && (
+                <div>
+                  <label className="block text-white/70 text-sm mb-2">Specify reason</label>
+                  <textarea
+                    value={banReasonOther}
+                    onChange={(e) => setBanReasonOther(e.target.value)}
+                    rows={3}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-white/40 focus:outline-none focus:border-red-500/50 resize-none"
+                    placeholder="Explain why this user is being banned..."
+                  />
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3">
@@ -858,6 +1010,7 @@ export default function UserDetails() {
                 onClick={() => {
                   setShowBanModal(false);
                   setBanReason('');
+                  setBanReasonOther('');
                 }}
                 className="flex-1 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-medium transition-all"
               >
@@ -865,7 +1018,7 @@ export default function UserDetails() {
               </button>
               <button
                 onClick={handleBan}
-                disabled={actionLoading || !banReason.trim()}
+                disabled={actionLoading || !banReason || (banReason === 'Other' && !banReasonOther.trim())}
                 className="flex-1 px-4 py-3 rounded-xl bg-red-500 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-50"
               >
                 {actionLoading ? 'Banning...' : 'Ban User'}

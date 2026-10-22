@@ -56,12 +56,13 @@ const AdminAnnouncements = lazy(() => import('@/pages/admin/Announcements'));
 const AdminGuardIntake = lazy(() => import('@/pages/admin/GuardIntake'));
 const AdminPostItem = lazy(() => import('@/pages/admin/PostItem'));
 const AdminMailingList = lazy(() => import('@/pages/admin/MailingList'));
+const AdminAppeals = lazy(() => import('@/pages/admin/Appeals'));
+const SuspendedPage = lazy(() => import('@/pages/Suspended'));
 
 // Utility pages (lazy)
 const SeedAdmin = lazy(() => import('@/pages/SeedAdmin'));
 const FixAdmin = lazy(() => import('@/pages/FixAdmin'));
 const OAuthDiagnostic = lazy(() => import('@/pages/OAuthDiagnostic'));
-const FloorPlanCalibrator = lazy(() => import('@/pages/FloorPlanCalibrator'));
 
 function LoadingFallback() {
   return (
@@ -109,6 +110,9 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading, userProfile } = useAuth();
   const location = useLocation();
 
+  const isSuspended = Boolean(userProfile?.suspended);
+  const isSuspendedPage = location.pathname === '/suspended';
+
   const isCustodianRestrictedRoute =
     String(userProfile?.role ?? '') === 'custodian' &&
     !location.pathname.startsWith('/guard-station');
@@ -121,7 +125,16 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
-  if (isCustodianRestrictedRoute) {
+  // Suspended (not banned) users can sign in but are confined to the appeal page.
+  if (isSuspended && !isSuspendedPage) {
+    return <Navigate to="/suspended" replace />;
+  }
+  // Non-suspended users have no business on the appeal page.
+  if (!isSuspended && isSuspendedPage) {
+    return <Navigate to="/browse" replace />;
+  }
+
+  if (isCustodianRestrictedRoute && !isSuspendedPage) {
     return <Navigate to="/guard-station" replace />;
   }
 
@@ -201,7 +214,6 @@ export default function App() {
                   <Route path="/seed-admin" element={<SeedAdmin />} />
                   <Route path="/fix-admin" element={<FixAdmin />} />
                   <Route path="/oauth-diagnostic" element={<OAuthDiagnostic />} />
-                  <Route path="/calibrate-floorplans" element={<FloorPlanCalibrator />} />
                 </>
               )}
 
@@ -219,6 +231,7 @@ export default function App() {
               <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
               <Route path="/teacher-verification" element={<RequireAuth><TeacherVerificationPage /></RequireAuth>} />
               <Route path="/guard-station" element={<RequireAuth><GuardStationPage /></RequireAuth>} />
+              <Route path="/suspended" element={<RequireAuth><SuspendedPage /></RequireAuth>} />
               {import.meta.env.DEV && (
                 <Route path="/diagnostic" element={<DiagnosticTest />} />
               )}
@@ -246,6 +259,7 @@ export default function App() {
               <Route path="/admin/announcements" element={<AdminRoute><AdminAnnouncements /></AdminRoute>} />
               <Route path="/admin/mailing-list" element={<AdminRoute><AdminMailingList /></AdminRoute>} />
               <Route path="/admin/teacher-verifications" element={<AdminRoute><TeacherVerifications /></AdminRoute>} />
+              <Route path="/admin/appeals" element={<AdminRoute><AdminAppeals /></AdminRoute>} />
 
               {/* 404 catch-all */}
               <Route path="*" element={<NotFoundPage />} />

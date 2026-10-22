@@ -1,40 +1,85 @@
 import { useState } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
 import { MapPin } from 'lucide-react'
-
-// Lyceum of Subic Bay — Rizal Highway, Subic Bay Freeport Zone
-const CAMPUS_CENTER: [number, number] = [14.8237, 120.2789]
 
 type Location = {
   id: string
   name: string
-  lat: number
-  lng: number
+  x: number // position as % of image width
+  y: number // position as % of image height
   items: number
-  color: string // tailwind bg class for legend/chips
   hex: string // hex for the map marker
 }
 
+type Floor = {
+  id: string
+  label: string
+  src: string
+  ratio: number // height / width of the floor-plan image
+  locations: Location[]
+}
+
+// Lyceum School Campus floor plans (public/floor-plans/*.png) with item pins
+// placed over real rooms on each plan.
+const FLOORS: Floor[] = [
+  {
+    id: 'ground',
+    label: 'Ground Floor',
+    src: '/floor-plans/ground_floor.png',
+    ratio: 800 / 1377,
+    locations: [
+      { id: 'chm-lab', name: 'CHM Lab', x: 45, y: 43, items: 12, hex: '#3b82f6' },
+      { id: 'canteen', name: 'Canteen', x: 55, y: 46, items: 8, hex: '#22c55e' },
+      { id: 'clinic', name: 'Clinic & Health Care', x: 67, y: 46, items: 5, hex: '#a855f7' },
+      { id: 'speech-lab', name: 'Speech Lab', x: 38, y: 50, items: 15, hex: '#f97316' },
+      { id: 'registrar', name: 'Registrar Office', x: 90, y: 60, items: 3, hex: '#ec4899' }
+    ]
+  },
+  {
+    id: 'second',
+    label: '2nd Floor',
+    src: '/floor-plans/2nd_floor.png',
+    ratio: 817 / 1368,
+    locations: [
+      { id: 'library', name: 'Library Area', x: 80, y: 32, items: 9, hex: '#3b82f6' },
+      { id: 'avr', name: 'AVR Room', x: 49, y: 32, items: 4, hex: '#22c55e' },
+      { id: 'criminology', name: 'Criminology Dept.', x: 26, y: 64, items: 6, hex: '#a855f7' },
+      { id: 'comp-lab-b206', name: 'Comp. Lab B-206', x: 67, y: 64, items: 7, hex: '#f97316' },
+      { id: 'eco-101', name: 'ECO 101', x: 18, y: 46, items: 2, hex: '#ec4899' }
+    ]
+  },
+  {
+    id: 'third-fourth',
+    label: '3rd & 4th Floor',
+    src: '/floor-plans/3rd_4th_floor.png',
+    ratio: 838 / 1336,
+    locations: [
+      { id: 'female-cr', name: 'Female CR', x: 29, y: 28, items: 3, hex: '#3b82f6' },
+      { id: 'eco-104', name: 'ECO 104', x: 29, y: 50, items: 5, hex: '#22c55e' },
+      { id: 'eco-106', name: 'ECO 106', x: 29, y: 76, items: 2, hex: '#a855f7' },
+      { id: 'office-4f', name: 'Office (4th)', x: 75, y: 33, items: 4, hex: '#f97316' },
+      { id: 'eco-108', name: 'ECO 108', x: 74, y: 63, items: 6, hex: '#ec4899' }
+    ]
+  }
+]
+
+const recentItems = [
+  { name: 'Blue Backpack', location: 'Library Area', time: '5 mins ago', emoji: '🎒' },
+  { name: 'iPhone 13', location: 'Canteen', time: '15 mins ago', emoji: '📱' },
+  { name: 'Water Bottle', location: 'ECO 104', time: '1 hour ago', emoji: '💧' }
+]
+
 export default function CampusMapDemo() {
+  const [floorId, setFloorId] = useState<string>(FLOORS[0].id)
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null)
+  const [hovered, setHovered] = useState<string | null>(null)
 
-  const locations: Location[] = [
-    { id: 'library', name: 'Library', lat: 14.82405, lng: 120.27845, items: 12, color: 'bg-blue-500', hex: '#3b82f6' },
-    { id: 'cafeteria', name: 'Cafeteria', lat: 14.82425, lng: 120.27925, items: 8, color: 'bg-green-500', hex: '#22c55e' },
-    { id: 'gym', name: 'Gym', lat: 14.82350, lng: 120.27955, items: 5, color: 'bg-purple-500', hex: '#a855f7' },
-    { id: 'parking', name: 'Parking Lot', lat: 14.82320, lng: 120.27830, items: 15, color: 'bg-orange-500', hex: '#f97316' },
-    { id: 'auditorium', name: 'Auditorium', lat: 14.82330, lng: 120.27905, items: 3, color: 'bg-pink-500', hex: '#ec4899' }
-  ]
+  const floor = FLOORS.find((f) => f.id === floorId) ?? FLOORS[0]
 
-  const recentItems = [
-    { name: 'Blue Backpack', location: 'Library', time: '5 mins ago', emoji: '🎒' },
-    { name: 'iPhone 13', location: 'Cafeteria', time: '15 mins ago', emoji: '📱' },
-    { name: 'Water Bottle', location: 'Gym', time: '1 hour ago', emoji: '💧' }
-  ]
-
-  const selected = locations.find((l) => l.id === selectedLocation) ?? null
+  const selectFloor = (id: string) => {
+    setFloorId(id)
+    setSelectedLocation(null)
+    setHovered(null)
+  }
 
   return (
     <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-3xl p-8">
@@ -52,46 +97,80 @@ export default function CampusMapDemo() {
         {/* Map */}
         <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <span className="text-white/70 text-sm">Lyceum of Subic Bay Campus</span>
-            <span className="text-[#ff7400] text-sm">{locations.reduce((sum, loc) => sum + loc.items, 0)} items</span>
+            <span className="text-white/70 text-sm">Lyceum School Campus — {floor.label}</span>
+            <span className="text-[#ff7400] text-sm">{floor.locations.reduce((sum, loc) => sum + loc.items, 0)} items</span>
           </div>
 
-          {/* Real interactive map */}
-          <div className="relative aspect-square rounded-xl border border-white/10 overflow-hidden z-0">
-            <MapContainer
-              center={CAMPUS_CENTER}
-              zoom={17}
-              scrollWheelZoom={false}
-              className="h-full w-full"
-              style={{ background: '#1a0d1c' }}
-            >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-              />
+          {/* Floor switcher */}
+          <div className="mb-4 flex flex-wrap gap-2">
+            {FLOORS.map((f) => (
+              <button
+                key={f.id}
+                onClick={() => selectFloor(f.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  f.id === floorId
+                    ? 'bg-[#ff7400] text-white'
+                    : 'bg-white/5 text-white/60 hover:bg-white/10'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
 
-              {locations.map((location) => (
-                <Marker
+          {/* Real campus floor plan with item pins */}
+          <div
+            className="relative w-full rounded-xl border border-white/10 overflow-hidden bg-white"
+            style={{ paddingBottom: `${floor.ratio * 100}%` }}
+          >
+            <img
+              src={floor.src}
+              alt={`Lyceum School Campus ${floor.label} plan`}
+              className="absolute inset-0 w-full h-full object-contain"
+            />
+
+            {floor.locations.map((location) => {
+              const active = selectedLocation === location.id || hovered === location.id
+              return (
+                <button
                   key={location.id}
-                  position={[location.lat, location.lng]}
-                  icon={createPinIcon(location.hex, selectedLocation === location.id)}
-                  eventHandlers={{ click: () => setSelectedLocation(location.id) }}
+                  type="button"
+                  onClick={() => setSelectedLocation(location.id)}
+                  onMouseEnter={() => setHovered(location.id)}
+                  onMouseLeave={() => setHovered(null)}
+                  className="absolute -translate-x-1/2 -translate-y-full focus:outline-none"
+                  style={{ left: `${location.x}%`, top: `${location.y}%` }}
+                  aria-label={`${location.name}, ${location.items} items`}
                 >
-                  <Popup>
-                    <strong>{location.name}</strong>
-                    <br />
-                    {location.items} items
-                  </Popup>
-                </Marker>
-              ))}
+                  <span className="relative block" style={{ width: active ? 34 : 26, height: active ? 34 : 26 }}>
+                    {active && (
+                      <span
+                        className="absolute inset-0 rounded-full animate-ping"
+                        style={{ background: location.hex, opacity: 0.35 }}
+                      />
+                    )}
+                    <span
+                      className="absolute inset-0 flex items-center justify-center rounded-full border-2 border-white shadow-lg"
+                      style={{ background: location.hex }}
+                    >
+                      <MapPin className="text-white" style={{ width: active ? 17 : 13, height: active ? 17 : 13 }} />
+                    </span>
+                  </span>
 
-              <FlyToSelected location={selected} />
-            </MapContainer>
+                  {active && (
+                    <span className="absolute left-1/2 top-full -translate-x-1/2 mt-1 px-2 py-1 rounded-md bg-gray-900 text-white text-[11px] leading-tight whitespace-nowrap shadow-xl z-10">
+                      <span className="block font-medium">{location.name}</span>
+                      <span className="block text-[#ff7400]">{location.items} items</span>
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           </div>
 
           {/* Legend */}
           <div className="mt-4 flex flex-wrap gap-2">
-            {locations.map((location) => (
+            {floor.locations.map((location) => (
               <button
                 key={location.id}
                 onClick={() => setSelectedLocation(location.id)}
@@ -152,44 +231,4 @@ export default function CampusMapDemo() {
       </div>
     </div>
   )
-}
-
-// Pan/zoom the map to the selected building
-function FlyToSelected({ location }: { location: Location | null }) {
-  const map = useMap()
-  if (location) {
-    map.flyTo([location.lat, location.lng], 18, { duration: 0.75 })
-  }
-  return null
-}
-
-// Build a colored teardrop pin as a Leaflet divIcon
-const iconCache = new Map<string, L.DivIcon>()
-function createPinIcon(hex: string, active: boolean): L.DivIcon {
-  const key = `${hex}-${active}`
-  const cached = iconCache.get(key)
-  if (cached) return cached
-
-  const size = active ? 38 : 30
-  const html = `
-    <div style="position:relative;width:${size}px;height:${size}px;transform:translateY(-${size / 2}px);">
-      ${active ? `<div style="position:absolute;inset:0;border-radius:9999px;background:${hex};opacity:.35;animation:lf-ping 1.2s cubic-bezier(0,0,.2,1) infinite;"></div>` : ''}
-      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-        background:${hex};border-radius:9999px;box-shadow:0 4px 10px rgba(0,0,0,.45);border:2px solid rgba(255,255,255,.85);">
-        <svg width="${size * 0.5}" height="${size * 0.5}" viewBox="0 0 24 24" fill="none"
-          stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-          <circle cx="12" cy="10" r="3"/>
-        </svg>
-      </div>
-    </div>`
-
-  const icon = L.divIcon({
-    html,
-    className: 'lf-pin-icon',
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size]
-  })
-  iconCache.set(key, icon)
-  return icon
 }

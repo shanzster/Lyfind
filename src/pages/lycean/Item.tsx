@@ -470,6 +470,11 @@ export default function ItemPage() {
                   <div className="flex-1">
                     <h4 className="text-white font-medium text-lg flex items-center gap-2 flex-wrap">
                       {item.userName}
+                      {item.postedByAdmin && (
+                        <span className="px-2 py-0.5 rounded-full bg-[#ff7400]/20 border border-[#ff7400]/40 text-[#ffb366] text-xs font-medium">
+                          Admin
+                        </span>
+                      )}
                       {item.postedByFaculty && (
                         <span className="px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-300 text-xs font-medium">
                           Verified Teacher

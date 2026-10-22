@@ -195,13 +195,10 @@ export const userService = {
         }
         return null;
       }
-      const untilText = until
-        ? ` until ${until.toDate().toLocaleDateString()} ${until.toDate().toLocaleTimeString()}`
-        : '';
-      const reasonText = profile.suspensionReason
-        ? ` Reason: ${profile.suspensionReason}`
-        : '';
-      return `Your account is suspended${untilText}.${reasonText}`;
+      // Suspended (but not banned) users are still allowed to sign in so they can
+      // submit an appeal. Routing gates them to the /suspended appeal page — see
+      // RequireAuth in App.tsx. Returning null here keeps them signed in.
+      return null;
     }
 
     return null;

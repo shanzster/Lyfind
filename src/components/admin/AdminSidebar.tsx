@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -14,14 +15,34 @@ import {
   GraduationCap,
   Megaphone,
   Building2,
-  Mail
+  Mail,
+  Gavel
 } from 'lucide-react';
 import { useAdminAuth } from '@/contexts/AdminAuthContext';
+import { adminService } from '@/services/adminService';
 
 export default function AdminSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { adminProfile, logout } = useAdminAuth();
+  // Counts of items needing attention, keyed by nav path (see getSidebarCounts).
+  const [counts, setCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    let active = true;
+    adminService
+      .getSidebarCounts()
+      .then((c) => {
+        if (active) setCounts(c);
+      })
+      .catch(() => {
+        /* badges are best-effort; ignore failures */
+      });
+    return () => {
+      active = false;
+    };
+    // Re-fetch when navigating between admin pages so counts stay fresh.
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     await logout();
@@ -58,26 +79,38 @@ export default function AdminSidebar() {
       icon: Building2,
       label: 'Guard Station Intake',
       path: '/admin/guard-intake',
-      permission: 'items.view'
+      permission: 'items.view',
+      badge: true
     },
     {
       icon: GraduationCap,
       label: 'Teacher Verifications',
       path: '/admin/teacher-verifications',
       // Gated on users.view so existing admin docs see it without reseeding
-      permission: 'users.view'
+      permission: 'users.view',
+      badge: true
+    },
+    {
+      icon: Gavel,
+      label: 'Appeals',
+      path: '/admin/appeals',
+      // Gated on users.view so existing admin docs see it without reseeding
+      permission: 'users.view',
+      badge: true
     },
     {
       icon: AlertTriangle,
       label: 'Reports',
       path: '/admin/reports',
-      permission: 'reports.view'
+      permission: 'reports.view',
+      badge: true
     },
     {
       icon: MessageSquare,
       label: 'Messages',
       path: '/admin/messages',
-      permission: 'messages.view'
+      permission: 'messages.view',
+      badge: true
     },
     {
       icon: Sparkles,
@@ -200,9 +233,19 @@ export default function AdminSidebar() {
                   >
                     <Icon className="w-5 h-5" />
                     <span className="font-medium">{item.label}</span>
-                    {item.badge && isActive && (
-                      <span className="ml-auto px-2 py-0.5 rounded-full bg-white/20 text-white text-xs font-bold">
-                        New
+                    {item.badge && (
+                      <span
+                        className={`ml-auto min-w-[1.5rem] text-center px-2 py-0.5 rounded-full text-xs font-bold ${
+                          (counts[item.path] ?? 0) > 0
+                            ? isActive
+                              ? 'bg-white/20 text-white'
+                              : 'bg-[#ff7400] text-white'
+                            : isActive
+                            ? 'bg-white/10 text-white/70'
+                            : 'bg-white/10 text-white/40'
+                        }`}
+                      >
+                        {counts[item.path] ?? 0}
                       </span>
                     )}
                   </Link>

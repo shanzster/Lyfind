@@ -375,6 +375,25 @@ export const adminService = {
     }
   },
 
+  // Lift an active suspension (turn the suspension off)
+  async unsuspendUser(userId: string, adminUid: string): Promise<void> {
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        suspended: false,
+        suspendedUntil: null,
+        suspensionReason: null,
+        unsuspendedBy: adminUid,
+        unsuspendedAt: Timestamp.now()
+      });
+
+      // Log admin action
+      await this.logAdminAction(adminUid, 'unsuspend_user', userId, {});
+    } catch (error) {
+      console.error('Error unsuspending user:', error);
+      throw error;
+    }
+  },
+
   // Ban user
   async banUser(userId: string, adminUid: string, reason: string): Promise<void> {
     try {
@@ -481,6 +500,53 @@ export const adminService = {
         foundItems: 0,
       };
     }
+  },
+
+  // Counts of items needing attention, keyed by sidebar nav path. Powers the
+  // numeric badges in AdminSidebar. All queries run in parallel; any failure
+  // degrades to 0 for that section rather than breaking the sidebar.
+  async getSidebarCounts(): Promise<Record<string, number>> {
+    const countDocs = async (q: any): Promise<number> => {
+      try {
+        const snap = await getDocs(q);
+        return snap.size;
+      } catch (e) {
+        console.warn('Sidebar count query failed:', e);
+        return 0;
+      }
+    };
+
+    const pendingReports = async (): Promise<{ total: number; messages: number }> => {
+      try {
+        const snap = await getDocs(
+          query(collection(db, 'reports'), where('status', '==', 'pending'))
+        );
+        const docs = snap.docs.map((d) => d.data() as any);
+        const messages = docs.filter((r) => r.conversationId || r.messageId).length;
+        return { total: snap.size, messages };
+      } catch (e) {
+        console.warn('Sidebar reports count failed:', e);
+        return { total: 0, messages: 0 };
+      }
+    };
+
+    const [approvals, guardIntake, teacherVerifications, appeals, reports] =
+      await Promise.all([
+        countDocs(query(collection(db, 'items'), where('status', '==', 'pending_approval'))),
+        countDocs(query(collection(db, 'guardIntake'), where('status', '==', 'logged'))),
+        countDocs(query(collection(db, 'teacherVerifications'), where('status', '==', 'pending'))),
+        countDocs(query(collection(db, 'appeals'), where('status', '==', 'pending'))),
+        pendingReports(),
+      ]);
+
+    return {
+      '/admin/approvals': approvals,
+      '/admin/guard-intake': guardIntake,
+      '/admin/teacher-verifications': teacherVerifications,
+      '/admin/reports': reports.total,
+      '/admin/messages': reports.messages,
+      '/admin/appeals': appeals,
+    };
   },
 
   // Log admin action
